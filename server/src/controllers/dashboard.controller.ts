@@ -1,0 +1,1 @@
+import type{Request,Response}from'express';import{getWarehouseDashboard}from'../repositories/dashboard.repository.js';export async function warehouse(_request:Request,response:Response){response.json({success:true,message:'Warehouse dashboard retrieved.',data:await getWarehouseDashboard()});}

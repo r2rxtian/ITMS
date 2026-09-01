@@ -1,0 +1,1 @@
+import{Router}from'express';import{warehouse}from'../controllers/dashboard.controller.js';import{requireAuth}from'../middleware/auth.middleware.js';import{asyncHandler}from'../utils/async-handler.js';export const dashboardRouter=Router();dashboardRouter.get('/warehouse',requireAuth,asyncHandler(warehouse));
