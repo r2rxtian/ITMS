@@ -37,6 +37,8 @@ const icons: Record<IconName, string> = {
 const icon = (name: IconName, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`;
 const formatPeso = (value: number | string) => new Intl.NumberFormat('en-PH',{style:'currency',currency:'PHP',minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0);
 let currentUserRole = '';
+let notificationSeenKey='stockhub.notifications.seenId';
+let latestNotificationId=0;
 
 const navItems: [IconName, string][] = [
   ['grid', 'Dashboard'], ['box', 'Inventory'], ['activity', 'Stock Tracking'],
@@ -136,7 +138,7 @@ app.innerHTML = `
         <label class="search"><span>${icon('search')}</span><input id="globalSearch" placeholder="Search items, SKU, categories..."/><kbd>Ctrl + K</kbd></label>
         <button class="icon-button mobile-search-button" id="mobileSearchButton" aria-label="Open search">${icon('search')}</button>
         <button class="icon-button" id="themeButton" aria-label="Toggle dark mode">${icon('moon')}</button>
-        <button class="icon-button notification" id="notificationButton" aria-label="Notifications">${icon('bell')}<span>3</span></button>
+        <button class="icon-button notification" id="notificationButton" aria-label="Notifications">${icon('bell')}<span hidden></span></button>
         <button class="primary-button" id="quickAdd">${icon('plus')}<span>Quick Add</span><i></i>${icon('chevron')}</button>
       </header>
       <main>
@@ -247,6 +249,8 @@ const renderLocationDetails = (location: WarehouseLocation) => {
   });
 };
 
+window.addEventListener('stockhub:view-location',async event=>{const id=Number((event as CustomEvent<{id:number}>).detail?.id);if(!id)return;try{const live:any=await apiRequest(`/locations/${id}`);renderLocationDetails({...live,currentUsage:Number(live.currentUsage??0),maximumCapacity:Number(live.maximumCapacity??0),skuCount:Number(live.skuCount??0),lowStockCount:Number(live.lowStockCount??0),outOfStockCount:Number(live.outOfStockCount??0),sublocations:live.sublocations??[],items:live.items??[]});}catch(error){showError(error instanceof Error?error.message:'Location details could not be loaded.');}});
+
 document.querySelectorAll<HTMLElement>('[data-location-id]').forEach(section => section.addEventListener('click', async () => {
   const location = warehouseData.locations.find(candidate => candidate.code === section.dataset.locationCode)
     ?? warehouseData.locations.find(candidate => candidate.id === Number(section.dataset.locationId));
@@ -325,7 +329,7 @@ async function hydrateDashboard():Promise<void>{
     alertRoot.innerHTML=alerts.length?alerts.slice(0,3).map((a:any)=>`<div class="alert-row"><span class="alert-icon ${a.severity==='CRITICAL'?'red':'orange'}">${icon('warning')}</span><span><b>${a.type.replaceAll('_',' ')}</b><small>${a.message}</small></span></div>`).join(''):`<div class="rail-empty">No active alerts</div>`;
     const activityRoot=document.querySelector<HTMLElement>('#dashboardActivity')!;
     activityRoot.innerHTML=transactions.transactions.length?transactions.transactions.slice(0,3).map((t:any)=>`<div class="activity-row"><span class="activity-icon blue">↔</span><span><b>${t.item} · ${t.transactionType.replaceAll('_',' ')}</b><small>${new Date(t.createdAt).toLocaleString()} by ${t.performedBy}</small></span></div>`).join(''):`<div class="rail-empty">No recent activity</div>`;
-    const badge=document.querySelector<HTMLElement>('#notificationButton span')!;badge.textContent=String(alerts.length);badge.hidden=!alerts.length;
+    latestNotificationId=alerts.reduce((latest:number,alert:any)=>Math.max(latest,Number(alert.id)||0),0);const seenNotificationId=Number(localStorage.getItem(notificationSeenKey)||0);const unreadCount=alerts.filter((alert:any)=>Number(alert.id)>seenNotificationId).length;const badge=document.querySelector<HTMLElement>('#notificationButton span')!;badge.textContent=String(unreadCount);badge.hidden=unreadCount===0;
     const notificationBody=document.querySelector<HTMLElement>('#notificationPanel section')!;notificationBody.innerHTML=alerts.length?alerts.map((a:any)=>`<article><b>${a.type.replaceAll('_',' ')}</b><span>${a.message}</span><small>${new Date(a.createdAt).toLocaleString()}</small></article>`).join(''):`<div class="rail-empty">You are all caught up.</div>`;
     const warehouses=locations.filter((l:any)=>l.locationType==='WAREHOUSE');const menu=document.querySelector<HTMLElement>('#warehouseMenu')!;menu.innerHTML=warehouses.map((w:any)=>`<button data-id="${w.id}"><b>${w.name}</b><small>${w.code}</small></button>`).join('')||'<span>No warehouses found</span>';
     menu.querySelectorAll<HTMLButtonElement>('button').forEach(button=>button.onclick=()=>{document.querySelector('#warehouseSelector b')!.textContent=button.querySelector('b')!.textContent!;menu.classList.remove('show');});
@@ -336,10 +340,11 @@ async function hydrateDashboard():Promise<void>{
 toast.querySelector('button')?.addEventListener('click', () => toast.classList.remove('show'));
 document.querySelector('#addForm')?.addEventListener('submit', async e => { e.preventDefault();const form=new FormData(e.target as HTMLFormElement);try{await apiRequest('/items',{method:'POST',body:JSON.stringify({name:form.get('name'),sku:form.get('sku'),description:form.get('description'),categoryId:Number(form.get('categoryId')),locationId:Number(form.get('locationId')),unit:'unit',unitCost:Number(form.get('unitCost')),reorderLevel:Number(form.get('reorderLevel')),initialQuantity:Number(form.get('quantity')),initialStockReason:'Initial stock entered during item creation.'})});closePanels();(e.target as HTMLFormElement).reset();window.dispatchEvent(new CustomEvent('stockhub:mutation'));document.querySelector('#toastText')!.textContent='New inventory item added';toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),3500);}catch(error){showError(error instanceof Error?error.message:'Item could not be saved.','Item could not be saved');} });
 
-document.querySelector('#notificationButton')?.addEventListener('click',()=>document.querySelector('#notificationPanel')?.classList.toggle('show'));
+const markNotificationsSeen=()=>{if(latestNotificationId>0)localStorage.setItem(notificationSeenKey,String(latestNotificationId));const badge=document.querySelector<HTMLElement>('#notificationButton span');if(badge){badge.textContent='0';badge.hidden=true;}};
+document.querySelector('#notificationButton')?.addEventListener('click',()=>{const panel=document.querySelector('#notificationPanel');const opening=!panel?.classList.contains('show');panel?.classList.toggle('show');if(opening)markNotificationsSeen();});
 document.querySelector('.close-notifications')?.addEventListener('click',()=>document.querySelector('#notificationPanel')?.classList.remove('show'));
 document.querySelector('#warehouseSelector')?.addEventListener('click',()=>document.querySelector('#warehouseMenu')?.classList.toggle('show'));
-document.querySelectorAll('.view-alerts').forEach(button=>button.addEventListener('click',()=>document.querySelector('#notificationPanel')?.classList.add('show')));
+document.querySelectorAll('.view-alerts').forEach(button=>button.addEventListener('click',()=>{document.querySelector('#notificationPanel')?.classList.add('show');markNotificationsSeen();}));
 document.querySelectorAll('.view-transactions').forEach(button=>button.addEventListener('click',()=>openModule('Stock Tracking')));
 async function loadLiveDashboard():Promise<void>{const page=document.querySelector<HTMLElement>('#dashboardPage')!;page.classList.add('dashboard-loading');page.classList.remove('dashboard-load-error');page.setAttribute('aria-busy','true');try{await Promise.all([hydrateDashboard(),loadWarehouseDashboard()]);page.classList.remove('dashboard-loading');}catch{page.classList.remove('dashboard-loading');page.classList.add('dashboard-load-error');}finally{page.setAttribute('aria-busy','false');}}
 
@@ -407,7 +412,7 @@ document.querySelector<HTMLButtonElement>('#globalLogout')!.addEventListener('cl
   }
 });
 
-async function initializeAuthenticatedUi():Promise<void>{const session:any=await apiRequest('/auth/me');currentUserRole=session.user.role;const admin=currentUserRole==='ADMIN';document.querySelector<HTMLButtonElement>('#quickAdd')!.hidden=!admin;const profile=document.querySelector<HTMLElement>('.profile')!;profile.querySelector('b')!.textContent=session.user.name;profile.querySelector('small')!.textContent=session.user.email;profile.querySelector('.avatar')!.textContent=session.user.name.split(/\s+/).map((part:string)=>part[0]).join('').slice(0,2).toUpperCase();await loadLiveDashboard();startLiveUpdates();}
+async function initializeAuthenticatedUi():Promise<void>{const session:any=await apiRequest('/auth/me');currentUserRole=session.user.role;notificationSeenKey=`stockhub.notifications.seenId.${String(session.user.email).toLowerCase()}`;const admin=currentUserRole==='ADMIN';document.querySelector<HTMLButtonElement>('#quickAdd')!.hidden=!admin;const profile=document.querySelector<HTMLElement>('.profile')!;profile.querySelector('b')!.textContent=session.user.name;profile.querySelector('small')!.textContent=session.user.email;profile.querySelector('.avatar')!.textContent=session.user.name.split(/\s+/).map((part:string)=>part[0]).join('').slice(0,2).toUpperCase();await loadLiveDashboard();startLiveUpdates();}
 void ensureSession().then(authenticated=>{
   if(authenticated){void initializeAuthenticatedUi();}
   else showLogin(()=>{void initializeAuthenticatedUi();});

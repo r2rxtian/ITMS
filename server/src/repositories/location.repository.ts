@@ -6,14 +6,21 @@ export async function listLocations() {
     SELECT l.location_id AS id,l.location_code AS code,l.location_name AS name,
       l.parent_location_id AS parentLocationId,p.location_name AS parentName,
       l.location_type AS locationType,l.maximum_capacity AS maximumCapacity,l.description,
-      COALESCE(SUM(CASE WHEN i.status='ACTIVE' THEN i.quantity ELSE 0 END),0) AS currentUsage,
-      COUNT(DISTINCT CASE WHEN i.status='ACTIVE' THEN i.item_id END) AS skuCount,l.status
+      COALESCE(usage.currentUsage,0) AS currentUsage,COALESCE(usage.skuCount,0) AS skuCount,
+      COALESCE(children.childCount,0) AS childCount,l.status
     FROM dbo.ims_warehouse_locations l
     LEFT JOIN dbo.ims_warehouse_locations p ON p.location_id=l.parent_location_id
-    LEFT JOIN dbo.ims_items i ON i.location_id=l.location_id
+    OUTER APPLY (
+      SELECT SUM(i.quantity) AS currentUsage,COUNT(DISTINCT i.item_id) AS skuCount
+      FROM dbo.ims_items i
+      JOIN dbo.ims_warehouse_locations itemLocation ON itemLocation.location_id=i.location_id
+      WHERE i.status='ACTIVE' AND (itemLocation.location_id=l.location_id OR itemLocation.parent_location_id=l.location_id)
+    ) usage
+    OUTER APPLY (
+      SELECT COUNT(*) AS childCount FROM dbo.ims_warehouse_locations child
+      WHERE child.parent_location_id=l.location_id AND child.status='ACTIVE'
+    ) children
     WHERE l.status='ACTIVE'
-    GROUP BY l.location_id,l.location_code,l.location_name,l.parent_location_id,
-      p.location_name,l.location_type,l.maximum_capacity,l.description,l.status
     ORDER BY l.location_code
   `)).recordset;
 }
