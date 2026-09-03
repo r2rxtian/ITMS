@@ -30,8 +30,9 @@ export function isDialogOpen(): boolean { return activeDialog !== null; }
 
 export type FormDialogField = {
   name: string; label: string; value?: string | number | null;
-  type?: 'text' | 'number' | 'textarea' | 'select'; required?: boolean;
+  type?: 'text' | 'number' | 'textarea' | 'select' | 'date'; required?: boolean;
   min?: number; step?: number; options?: Array<{label:string;value:string}>;
+  placeholder?: string;
 };
 
 export function showFormDialog(title: string, fields: FormDialogField[], submitLabel = 'Save'): Promise<Record<string,string> | null> {
@@ -43,9 +44,9 @@ export function showFormDialog(title: string, fields: FormDialogField[], submitL
     const closeButton=document.createElement('button');closeButton.className='app-dialog-close';closeButton.type='button';closeButton.setAttribute('aria-label','Close');closeButton.textContent='×';
     const form=document.createElement('form');form.className='admin-dialog-form';
     fields.forEach(field=>{const label=document.createElement('label');label.textContent=field.label;let control:HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;
-      if(field.type==='textarea'){control=document.createElement('textarea');}
+      if(field.type==='textarea'){control=document.createElement('textarea');if(field.placeholder)(control as HTMLTextAreaElement).placeholder=field.placeholder;}
       else if(field.type==='select'){const select=document.createElement('select');field.options?.forEach(option=>{const node=document.createElement('option');node.value=option.value;node.textContent=option.label;select.append(node);});control=select;}
-      else{const input=document.createElement('input');input.type=field.type??'text';if(field.min!==undefined)input.min=String(field.min);if(field.step!==undefined)input.step=String(field.step);control=input;}
+      else{const input=document.createElement('input');input.type=field.type??'text';if(field.min!==undefined)input.min=String(field.min);if(field.step!==undefined)input.step=String(field.step);if(field.placeholder)input.placeholder=field.placeholder;control=input;}
       control.name=field.name;control.required=field.required??false;control.value=String(field.value??'');label.append(control);form.append(label);
     });
     const actions=document.createElement('div');actions.className='admin-dialog-actions';actions.innerHTML=`<button type="button" class="cancel">Cancel</button><button type="submit" class="save"></button>`;actions.querySelector<HTMLButtonElement>('.save')!.textContent=submitLabel;form.append(actions);dialog.append(heading,closeButton,form);overlay.append(dialog);document.body.append(overlay);activeDialog=overlay;

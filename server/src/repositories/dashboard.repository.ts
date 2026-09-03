@@ -1,20 +1,41 @@
 import { getPool } from '../config/database.js';
 
-export async function getWarehouseDashboard() {
+export async function getWarehouseDashboard(warehouseId?: number, slotIds?: number[]) {
   const pool = await getPool();
-  const main = (await pool.request().query(`
-    SELECT TOP 1 location_id AS id, location_name AS name, maximum_capacity AS maximumCapacity
+  const req = pool.request();
+  let mainQuery = `
+    SELECT TOP 1 location_id AS id, location_code AS code, location_name AS name, maximum_capacity AS maximumCapacity
     FROM dbo.ims_warehouse_locations
     WHERE location_type = 'WAREHOUSE' AND status = 'ACTIVE'
-    ORDER BY location_id
-  `)).recordset[0];
+  `;
+  if (warehouseId && Number.isInteger(warehouseId) && warehouseId > 0) {
+    req.input('targetWarehouseId', warehouseId);
+    mainQuery += ` AND location_id = @targetWarehouseId`;
+  }
+  mainQuery += ` ORDER BY location_id`;
+
+  const main = (await req.query(mainQuery)).recordset[0];
 
   if (!main) return {
-    name: 'Main Warehouse', currentUsage: 0, maximumCapacity: 0,
+    id: 0, code: 'MAIN', name: 'Main Warehouse', currentUsage: 0, maximumCapacity: 0,
     utilizationPercentage: 0, locationCount: 0, locations: []
   };
 
-  const locations = (await pool.request().input('mainId', main.id).query(`
+  const locReq = pool.request().input('mainId', main.id);
+  let whereClause = `WHERE section.status = 'ACTIVE'`;
+
+  if (slotIds && slotIds.length > 0) {
+    const validIds = slotIds.filter(n => Number.isInteger(n) && n > 0);
+    if (validIds.length > 0) {
+      whereClause += ` AND section.location_id IN (${validIds.join(',')})`;
+    } else {
+      whereClause += ` AND section.parent_location_id = @mainId AND section.location_type = 'SECTION'`;
+    }
+  } else {
+    whereClause += ` AND section.parent_location_id = @mainId AND section.location_type = 'SECTION'`;
+  }
+
+  const locations = (await locReq.query(`
     SELECT
       section.location_id AS id,
       section.location_code AS code,
@@ -37,9 +58,7 @@ export async function getWarehouseDashboard() {
       WHERE i.status = 'ACTIVE'
         AND (itemLocation.location_id = section.location_id OR itemLocation.parent_location_id = section.location_id)
     ) usage
-    WHERE section.parent_location_id = @mainId
-      AND section.location_type = 'SECTION'
-      AND section.status = 'ACTIVE'
+    ${whereClause}
     ORDER BY section.location_code
   `)).recordset.map((location: any) => ({
     ...location,
@@ -54,6 +73,8 @@ export async function getWarehouseDashboard() {
   const currentUsage = locations.reduce((sum: number, location: any) => sum + location.currentUsage, 0);
   const maximumCapacity = locations.reduce((sum: number, location: any) => sum + location.maximumCapacity, 0);
   return {
+    id: main.id,
+    code: main.code,
     name: main.name,
     currentUsage,
     maximumCapacity,

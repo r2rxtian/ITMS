@@ -13,9 +13,21 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     ...init
   });
   const contentType = response.headers.get('content-type') ?? '';
-  const payload = contentType.includes('application/json')
-    ? await response.json()
-    : { success: false, message: response.status === 502 ? 'The API server is not running.' : 'The server returned a non-JSON response.', errors: [] };
+  let payload: any;
+  if (contentType.includes('application/json')) {
+    payload = await response.json();
+  } else {
+    const text = await response.text().catch(() => '');
+    payload = {
+      success: false,
+      message: response.status === 429
+        ? 'Too many requests. Please wait a moment and try again.'
+        : response.status === 502
+          ? 'The API server is not running.'
+          : text.slice(0, 100) || 'The server returned an unexpected response.',
+      errors: []
+    };
+  }
   if (!response.ok || !payload.success) throw new ApiError(payload.message ?? 'Request failed.', response.status, payload.errors);
   return payload.data as T;
 }

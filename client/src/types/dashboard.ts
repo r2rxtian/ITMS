@@ -12,6 +12,8 @@ export interface DashboardLocation {
 }
 
 export interface DashboardWarehouse {
+  id?: number;
+  code?: string;
   name: string;
   currentUsage: number;
   maximumCapacity: number;

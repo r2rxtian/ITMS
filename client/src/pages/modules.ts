@@ -1,11 +1,11 @@
 import { apiRequest, ApiError } from '../services/api';
 import { confirmAction, showError, showFormDialog } from '../ui/dialog';
 
-type PageName='Inventory'|'Stock Tracking'|'Categories'|'Locations'|'Reports'|'Settings';
+type PageName='Inventory'|'Stock Tracking'|'Categories'|'Locations'|'Plans'|'Reports'|'Settings';
 const esc=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const formatPeso=(value:number|string)=>new Intl.NumberFormat('en-PH',{style:'currency',currency:'PHP',minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0);
 const empty=(message:string)=>`<div class="module-empty"><strong>No records found</strong><span>${message}</span></div>`;
-const shell=(title:string,description:string,actions='',body='')=>`<section class="module-view"><div class="module-heading"><div><h2>${title}</h2><p>${description}</p></div><div class="module-actions">${actions}</div></div><div class="module-body">${body||'<div class="module-loading">Loading data…</div>'}</div></section>`;
+const shell=(_title:string,_description:string,actions='',body='')=>`<section class="module-view">${actions?`<div class="module-heading"><div class="module-actions">${actions}</div></div>`:''}<div class="module-body">${body||'<div class="module-loading">Loading data…</div>'}</div></section>`;
 const button=(id:string,label:string,primary=false)=>`<button id="${id}" class="module-button ${primary?'primary':''}">${label}</button>`;
 
 type TableState={page:number;limit:number;total:number;search:string};
@@ -13,7 +13,61 @@ const perPageOptions=(selected:number)=>[10,15,20].map(value=>`<option value="${
 const pagination=(state:TableState)=>{const start=state.total?(state.page-1)*state.limit+1:0;const end=Math.min(state.page*state.limit,state.total);const pages=Math.max(1,Math.ceil(state.total/state.limit));return`<div class="table-pagination"><span>Showing <b>${start}–${end}</b> of <b>${state.total}</b></span><label>Rows per page <select class="per-page">${perPageOptions(state.limit)}</select></label><div><button class="page-prev" ${state.page<=1?'disabled':''}>Previous</button><span>Page ${state.page} of ${pages}</span><button class="page-next" ${state.page>=pages?'disabled':''}>Next</button></div></div>`;};
 const bindPagination=(body:HTMLElement,state:TableState,load:()=>Promise<void>)=>{body.querySelector<HTMLSelectElement>('.per-page')?.addEventListener('change',event=>{state.limit=Number((event.target as HTMLSelectElement).value);state.page=1;void load();});body.querySelector<HTMLButtonElement>('.page-prev')?.addEventListener('click',()=>{if(state.page>1){state.page--;void load();}});body.querySelector<HTMLButtonElement>('.page-next')?.addEventListener('click',()=>{if(state.page*state.limit<state.total){state.page++;void load();}});};
 const bindSearch=(input:HTMLInputElement|undefined,onChange:(value:string)=>void)=>{if(!input)return;let timer=0;input.addEventListener('input',()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>onChange(input.value.trim()),250);});};
-const bindRowMenus=(body:HTMLElement)=>{const close=()=>{body.querySelectorAll<HTMLElement>('.row-menu-popover.show').forEach(menu=>{menu.classList.remove('show');menu.style.removeProperty('left');menu.style.removeProperty('top');menu.previousElementSibling?.setAttribute('aria-expanded','false');});};body.querySelectorAll<HTMLButtonElement>('.kebab-button').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const menu=button.nextElementSibling as HTMLElement;const opening=!menu.classList.contains('show');close();if(!opening)return;menu.classList.add('show');button.setAttribute('aria-expanded','true');if(innerWidth>650){const rect=button.getBoundingClientRect();const width=menu.offsetWidth;const height=menu.offsetHeight;menu.style.left=`${Math.max(8,Math.min(innerWidth-width-8,rect.right-width))}px`;menu.style.top=`${rect.bottom+height+8>innerHeight?Math.max(8,rect.top-height-6):rect.bottom+6}px`;}}));body.onclick=close;body.querySelector('.module-table-wrap')?.addEventListener('scroll',close,{passive:true});};
+
+let rowMenuCleanup: (() => void) | null = null;
+const bindRowMenus=(body:HTMLElement)=>{
+  rowMenuCleanup?.();
+  const close=()=>{
+    body.querySelectorAll<HTMLElement>('.row-menu-popover.show').forEach(menu=>{
+      menu.classList.remove('show');
+      menu.style.removeProperty('left');
+      menu.style.removeProperty('top');
+      menu.previousElementSibling?.setAttribute('aria-expanded','false');
+    });
+  };
+  body.querySelectorAll<HTMLButtonElement>('.kebab-button').forEach(button=>button.addEventListener('click',event=>{
+    event.stopPropagation();
+    const menu=button.nextElementSibling as HTMLElement|null;
+    if(!menu)return;
+    const opening=!menu.classList.contains('show');
+    close();
+    if(!opening)return;
+    menu.classList.add('show');
+    button.setAttribute('aria-expanded','true');
+    if(window.innerWidth>650){
+      const rect=button.getBoundingClientRect();
+      const width=menu.offsetWidth||160;
+      const height=menu.offsetHeight||140;
+      let left=rect.right-width;
+      left=Math.max(12,Math.min(window.innerWidth-width-12,left));
+      const spaceBelow=window.innerHeight-rect.bottom;
+      let top:number;
+      if(spaceBelow<height+10&&rect.top>height+10){
+        top=rect.top-height-6;
+      }else{
+        top=rect.bottom+6;
+      }
+      top=Math.max(12,Math.min(window.innerHeight-height-12,top));
+      menu.style.left=`${Math.round(left)}px`;
+      menu.style.top=`${Math.round(top)}px`;
+    }
+  }));
+  body.querySelectorAll<HTMLButtonElement>('.row-menu-popover button').forEach(btn=>{
+    btn.addEventListener('click',()=>close());
+  });
+  const onDocClick=(e:MouseEvent)=>{if(!(e.target as HTMLElement|null)?.closest('.row-menu'))close();};
+  const onDocKey=(e:KeyboardEvent)=>{if(e.key==='Escape')close();};
+  document.addEventListener('click',onDocClick);
+  window.addEventListener('scroll',close,{passive:true,capture:true});
+  window.addEventListener('resize',close,{passive:true});
+  window.addEventListener('keydown',onDocKey);
+  rowMenuCleanup=()=>{
+    document.removeEventListener('click',onDocClick);
+    window.removeEventListener('scroll',close,{capture:true});
+    window.removeEventListener('resize',close);
+    window.removeEventListener('keydown',onDocKey);
+  };
+};
 
 export async function ensureSession():Promise<boolean>{try{await apiRequest('/auth/me');return true;}catch{return false;}}
 export function showLogin(onSuccess:()=>void){
@@ -61,10 +115,12 @@ export function showLogin(onSuccess:()=>void){
   form.addEventListener('submit',async e=>{e.preventDefault();const data=new FormData(form);const error=overlay.querySelector<HTMLElement>('.login-error')!;const submit=overlay.querySelector<HTMLButtonElement>('.login-submit')!;error.textContent='';submit.disabled=true;submit.lastElementChild!.textContent='Signing In…';try{await apiRequest('/auth/login',{method:'POST',body:JSON.stringify({email:data.get('email'),password:data.get('password')})});if(data.get('remember'))localStorage.setItem('stockhub.rememberedEmail',String(data.get('email')));else localStorage.removeItem('stockhub.rememberedEmail');overlay.remove();onSuccess();}catch(reason){error.textContent=reason instanceof Error?reason.message:'Sign in failed.';submit.disabled=false;submit.lastElementChild!.textContent='Sign In';}});
 }
 
+const warehouseTag=(name?:string,code?:string)=>{const norm=String(name||'').toLowerCase();const isEast=norm.includes('east')||String(code||'').toUpperCase().includes('EAST');const label=esc(name||'Main Warehouse');const codeTag=code?`<small class="wh-code">${esc(code)}</small>`:'';return`<span class="warehouse-badge ${isEast?'east-hub':'main-wh'}" title="Warehouse: ${label} (${esc(code||'')})"><span class="wh-icon">${isEast?'🏭':'🏢'}</span><b>${label}</b>${codeTag}</span>`;};
+
 async function inventory(root:HTMLElement){
   const session:any=await apiRequest('/auth/me');const isAdmin=session.user.role==='ADMIN';
   root.innerHTML=shell('Inventory','Manage items, stock levels, and warehouse assignments.',button('refreshItems','Refresh')+(isAdmin?button('addInventory','+ Add Item',true):''));root.querySelector('.module-view')?.classList.add('inventory-view');
-  const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{const data:any=await apiRequest('/items?page=1&limit=100');body.innerHTML=data.items.length?`<div class="module-table-wrap"><table class="module-table"><thead><tr><th>SKU</th><th>Item</th><th>Category</th><th>Location</th><th>Quantity</th><th>Unit Cost</th><th>Status</th><th>Actions</th></tr></thead><tbody>${data.items.map((item:any)=>`<tr><td>${esc(item.sku)}</td><td class="full-name-cell"><b>${esc(item.name)}</b><small>${esc(item.description||'')}</small></td><td>${esc(item.category)}</td><td>${esc(item.locationCode)}</td><td>${esc(item.quantity)}</td><td>${formatPeso(item.unitCost)}</td><td><span class="pill ${item.stockStatus==='In Stock'?'green':'orange'}">${esc(item.stockStatus)}</span></td><td class="row-menu-cell"><div class="row-menu"><button class="kebab-button" type="button" aria-label="Actions for ${esc(item.name)}" aria-expanded="false">⋮</button><div class="row-menu-popover"><button class="stock-in" data-id="${item.id}">Stock In</button><button class="stock-out" data-id="${item.id}">Stock Out</button>${isAdmin?`<button class="edit-item" data-id="${item.id}">Edit</button><button class="danger archive-item" data-id="${item.id}">Delete</button>`:''}</div></div></td></tr>`).join('')}</tbody></table></div>`:empty('Add your first inventory item.');
+  const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{const data:any=await apiRequest('/items?page=1&limit=100');body.innerHTML=data.items.length?`<div class="module-table-wrap"><table class="module-table"><thead><tr><th>SKU</th><th>Item</th><th>Category</th><th>Warehouse</th><th>Location</th><th>Quantity</th><th>Unit Cost</th><th>Status</th><th>Actions</th></tr></thead><tbody>${data.items.map((item:any)=>`<tr><td>${esc(item.sku)}</td><td class="full-name-cell"><b>${esc(item.name)}</b><small>${esc(item.description||'')}</small></td><td>${esc(item.category)}</td><td>${warehouseTag(item.warehouseName,item.warehouseCode)}</td><td>${esc(item.locationCode)}</td><td>${esc(item.quantity)}</td><td>${formatPeso(item.unitCost)}</td><td><span class="pill ${item.stockStatus==='In Stock'?'green':'orange'}">${esc(item.stockStatus)}</span></td><td class="row-menu-cell"><div class="row-menu"><button class="kebab-button" type="button" aria-label="Actions for ${esc(item.name)}" aria-expanded="false">⋮</button><div class="row-menu-popover"><button class="stock-in" data-id="${item.id}">Stock In</button><button class="stock-out" data-id="${item.id}">Stock Out</button>${isAdmin?`<button class="edit-item" data-id="${item.id}">Edit</button><button class="danger archive-item" data-id="${item.id}">Delete</button>`:''}</div></div></td></tr>`).join('')}</tbody></table></div>`:empty('Add your first inventory item.');
     body.querySelectorAll<HTMLButtonElement>('.kebab-button').forEach(button=>button.onclick=event=>{event.stopPropagation();const menu=button.nextElementSibling as HTMLElement;body.querySelectorAll<HTMLElement>('.row-menu-popover.show').forEach(open=>{if(open!==menu)open.classList.remove('show');});menu.classList.toggle('show');button.setAttribute('aria-expanded',String(menu.classList.contains('show')));});
     body.onclick=()=>body.querySelectorAll<HTMLElement>('.row-menu-popover.show').forEach(open=>open.classList.remove('show'));
     body.querySelectorAll<HTMLButtonElement>('.stock-in,.stock-out').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));const direction=control.classList.contains('stock-in')?'in':'out';const values=await showFormDialog(`${direction==='in'?'Stock In':'Stock Out'} — ${item.name}`,[{name:'quantity',label:'Quantity',type:'number',min:.01,step:.01,required:true},{name:'reason',label:'Reason or reference',type:'textarea',required:true}],direction==='in'?'Add Stock':'Remove Stock');if(!values)return;const quantity=Number(values.quantity);if(!Number.isFinite(quantity)||quantity<=0){showError('Enter a quantity greater than zero.','Invalid quantity');return;}try{await apiRequest(`/stock/${direction}`,{method:'POST',body:JSON.stringify({itemId:item.id,quantity,reason:values.reason})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Operation failed.','Stock operation failed');}});
@@ -78,17 +134,22 @@ async function transactions(root:HTMLElement){root.innerHTML=shell('Stock Tracki
 
 async function inventoryPaged(root:HTMLElement){
   const session:any=await apiRequest('/auth/me');const isAdmin=session.user.role==='ADMIN';const canStock=isAdmin||session.user.role==='STAFF';
-  const state:TableState={page:1,limit:10,total:0,search:''};let categoryId=sessionStorage.getItem('stockhub.inventoryCategory')??'';sessionStorage.removeItem('stockhub.inventoryCategory');let status='all';const categories:any[]=await apiRequest('/categories');
+  const state:TableState={page:1,limit:10,total:0,search:''};let categoryId=sessionStorage.getItem('stockhub.inventoryCategory')??'';sessionStorage.removeItem('stockhub.inventoryCategory');let warehouseFilter='';let status='all';
+  const [categories,locations]:any[]=await Promise.all([apiRequest('/categories'),apiRequest('/locations')]);
+  const warehouses=(locations||[]).filter((l:any)=>l.locationType==='WAREHOUSE');
   root.innerHTML=shell('Inventory','Manage items, stock levels, and warehouse assignments.',button('refreshItems','Refresh')+(isAdmin?button('addInventory','+ Add Item',true):''));
   const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{
-    const params=new URLSearchParams({page:String(state.page),limit:String(state.limit),search:state.search,status});if(categoryId)params.set('categoryId',categoryId);const results:any[]=await Promise.all([apiRequest(`/items?${params}`),apiRequest('/reports/inventory-summary')]);const data=results[0];const summary=results[1];state.total=data.total;if(!data.items.length&&state.page>1){state.page--;return load();}
+    const params=new URLSearchParams({page:String(state.page),limit:String(state.limit),search:state.search,status});
+    if(categoryId)params.set('categoryId',categoryId);
+    if(warehouseFilter)params.set('warehouseId',warehouseFilter);
+    const results:any[]=await Promise.all([apiRequest(`/items?${params}`),apiRequest('/reports/inventory-summary')]);const data=results[0];const summary=results[1];state.total=data.total;if(!data.items.length&&state.page>1){state.page--;return load();}
     const stats=`<section class="inventory-stats"><article class="blue"><span><svg viewBox="0 0 24 24"><path d="m5 7 7-4 7 4-7 4Z"/><path d="M5 7v10l7 4 7-4V7M12 11v10"/></svg></span><div><small>Total Items</small><b>${Number(summary.totalItems||0).toLocaleString()}</b><p>All inventory items</p></div></article><article class="orange"><span><svg viewBox="0 0 24 24"><path d="M4 19 9 13l4 3 7-9"/><path d="M16 7h4v4"/></svg></span><div><small>Low Stock Items</small><b>${Number(summary.lowStockItems||0).toLocaleString()}</b><p>Need attention</p></div></article><article class="red"><span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v9M8 12l4 4 4-4"/></svg></span><div><small>Out of Stock Items</small><b>${Number(summary.outOfStockItems||0).toLocaleString()}</b><p>Out of stock</p></div></article><article class="green"><span><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-2-1.8-3.5-4-3.5S8 5.2 8 7s1.4 2.7 4 3.2 4 1.5 4 3.7-1.8 4.1-4 4.1-4-1.5-4-3.5"/></svg></span><div><small>Total Inventory Value</small><b>${formatPeso(summary.inventoryValue)}</b><p>Across all items</p></div></article></section>`;
-    const toolbar=`<div class="table-filterbar"><label class="table-search-wrap"><span>Search</span><input class="table-search" value="${esc(state.search)}" placeholder="Item name, SKU, category or location"></label><label><span>Category</span><select class="category-filter"><option value="">All categories</option>${categories.map(category=>`<option value="${category.id}" ${String(category.id)===categoryId?'selected':''}>${esc(category.name)}</option>`).join('')}</select></label><label><span>Status</span><select class="status-filter"><option value="all" ${status==='all'?'selected':''}>All statuses</option><option value="in-stock" ${status==='in-stock'?'selected':''}>In Stock</option><option value="low-stock" ${status==='low-stock'?'selected':''}>Low Stock</option><option value="out-of-stock" ${status==='out-of-stock'?'selected':''}>Out of Stock</option></select></label></div>`;
-    const table=data.items.length?`<div class="module-table-wrap"><table class="module-table"><thead><tr><th>SKU</th><th>Item</th><th>Category</th><th>Location</th><th>Quantity</th><th>Unit Cost</th><th>Status</th><th>Actions</th></tr></thead><tbody>${data.items.map((item:any)=>`<tr><td>${esc(item.sku)}</td><td class="full-name-cell"><b>${esc(item.name)}</b><small>${esc(item.description||'')}</small></td><td>${esc(item.category)}</td><td>${esc(item.locationCode)}</td><td>${esc(item.quantity)}</td><td>${formatPeso(item.unitCost)}</td><td><span class="pill ${item.stockStatus==='In Stock'?'green':item.stockStatus==='Out of Stock'?'red':'orange'}">${esc(item.stockStatus)}</span></td><td class="row-menu-cell">${canStock||isAdmin?`<div class="row-menu"><button class="kebab-button" type="button" aria-label="Actions for ${esc(item.name)}" aria-expanded="false">⋮</button><div class="row-menu-popover">${canStock?`<button class="stock-in" data-id="${item.id}">Stock In</button><button class="stock-out" data-id="${item.id}">Stock Out</button>`:''}${isAdmin?`<button class="edit-item" data-id="${item.id}">Edit</button><button class="danger archive-item" data-id="${item.id}">Delete</button>`:''}</div></div>`:'—'}</td></tr>`).join('')}</tbody></table></div>`:empty('No inventory items match the selected filters.');
-    body.innerHTML=stats+toolbar+table+pagination(state);bindPagination(body,state,load);bindSearch(body.querySelector<HTMLInputElement>('.table-search')??undefined,value=>{state.search=value;state.page=1;void load();});body.querySelector<HTMLSelectElement>('.category-filter')!.onchange=event=>{categoryId=(event.target as HTMLSelectElement).value;state.page=1;void load();};body.querySelector<HTMLSelectElement>('.status-filter')!.onchange=event=>{status=(event.target as HTMLSelectElement).value;state.page=1;void load();};bindRowMenus(body);
+    const toolbar=`<div class="table-filterbar"><label class="table-search-wrap"><span>Search</span><input class="table-search" value="${esc(state.search)}" placeholder="Item name, SKU, warehouse, category or location"></label><label><span>Warehouse</span><select class="warehouse-filter"><option value="">All warehouses</option>${warehouses.map((w:any)=>`<option value="${w.id}" ${warehouseFilter===String(w.id)?'selected':''}>${esc(w.name)}</option>`).join('')}</select></label><label><span>Category</span><select class="category-filter"><option value="">All categories</option>${categories.map((category:any)=>`<option value="${category.id}" ${String(category.id)===categoryId?'selected':''}>${esc(category.name)}</option>`).join('')}</select></label><label><span>Status</span><select class="status-filter"><option value="all" ${status==='all'?'selected':''}>All statuses</option><option value="in-stock" ${status==='in-stock'?'selected':''}>In Stock</option><option value="low-stock" ${status==='low-stock'?'selected':''}>Low Stock</option><option value="out-of-stock" ${status==='out-of-stock'?'selected':''}>Out of Stock</option></select></label></div>`;
+    const table=data.items.length?`<div class="module-table-wrap"><table class="module-table"><thead><tr><th>SKU</th><th>Item</th><th>Category</th><th>Warehouse</th><th>Location</th><th>Quantity</th><th>Unit Cost</th><th>Status</th><th>Actions</th></tr></thead><tbody>${data.items.map((item:any)=>`<tr><td>${esc(item.sku)}</td><td class="full-name-cell"><b>${esc(item.name)}</b><small>${esc(item.description||'')}</small></td><td>${esc(item.category)}</td><td>${warehouseTag(item.warehouseName,item.warehouseCode)}</td><td>${esc(item.locationCode)}</td><td>${esc(item.quantity)}</td><td>${formatPeso(item.unitCost)}</td><td><span class="pill ${item.stockStatus==='In Stock'?'green':item.stockStatus==='Out of Stock'?'red':'orange'}">${esc(item.stockStatus)}</span></td><td class="row-menu-cell">${canStock||isAdmin?`<div class="row-menu"><button class="kebab-button" type="button" aria-label="Actions for ${esc(item.name)}" aria-expanded="false">⋮</button><div class="row-menu-popover"><button type="button" class="stock-in" data-id="${item.id}">Stock In</button><button type="button" class="stock-out" data-id="${item.id}">Stock Out</button>${isAdmin?`<button type="button" class="edit-item" data-id="${item.id}">Edit</button>`:''}<button type="button" class="danger archive-item" data-id="${item.id}">Delete</button></div></div>`:'—'}</td></tr>`).join('')}</tbody></table></div>`:empty('No inventory items match the selected filters.');
+    body.innerHTML=stats+toolbar+table+pagination(state);bindPagination(body,state,load);bindSearch(body.querySelector<HTMLInputElement>('.table-search')??undefined,value=>{state.search=value;state.page=1;void load();});body.querySelector<HTMLSelectElement>('.warehouse-filter')!.onchange=event=>{warehouseFilter=(event.target as HTMLSelectElement).value;state.page=1;void load();};body.querySelector<HTMLSelectElement>('.category-filter')!.onchange=event=>{categoryId=(event.target as HTMLSelectElement).value;state.page=1;void load();};body.querySelector<HTMLSelectElement>('.status-filter')!.onchange=event=>{status=(event.target as HTMLSelectElement).value;state.page=1;void load();};bindRowMenus(body);
     body.querySelectorAll<HTMLButtonElement>('.stock-in,.stock-out').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));const direction=control.classList.contains('stock-in')?'in':'out';const values=await showFormDialog(`${direction==='in'?'Stock In':'Stock Out'} — ${item.name}`,[{name:'quantity',label:'Quantity',type:'number',min:.01,step:.01,required:true},{name:'reason',label:'Reason or reference',type:'textarea',required:true}],direction==='in'?'Add Stock':'Remove Stock');if(!values)return;const quantity=Number(values.quantity);if(!Number.isFinite(quantity)||quantity<=0){showError('Enter a quantity greater than zero.','Invalid quantity');return;}try{await apiRequest(`/stock/${direction}`,{method:'POST',body:JSON.stringify({itemId:item.id,quantity,reason:values.reason})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Operation failed.','Stock operation failed');}});
-    body.querySelectorAll<HTMLButtonElement>('.edit-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));const values=await showFormDialog(`Edit ${item.name}`,[{name:'name',label:'Item name',value:item.name,required:true},{name:'description',label:'Description',value:item.description,type:'textarea'},{name:'categoryId',label:'Category',value:item.categoryId,type:'select',options:categories.map(entry=>({label:entry.name,value:String(entry.id)}))},{name:'unitCost',label:'Unit cost (PHP ₱)',value:item.unitCost,type:'number',min:0,step:.01,required:true},{name:'reorderLevel',label:'Reorder level',value:item.reorderLevel,type:'number',min:0,required:true},{name:'maximumStock',label:'Maximum stock',value:item.maximumStock,type:'number',min:0}]);if(!values)return;try{await apiRequest(`/items/${item.id}`,{method:'PUT',body:JSON.stringify({name:values.name,description:values.description,categoryId:Number(values.categoryId),unitCost:Number(values.unitCost),reorderLevel:Number(values.reorderLevel),maximumStock:values.maximumStock?Number(values.maximumStock):null})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Item could not be updated.');}});
-    body.querySelectorAll<HTMLButtonElement>('.archive-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));if(!await confirmAction(`Delete ${item.name}? Its transaction history will be preserved.`,'Delete inventory item'))return;try{await apiRequest(`/items/${item.id}`,{method:'DELETE'});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Item could not be deleted.');}});
+    body.querySelectorAll<HTMLButtonElement>('.edit-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));const values=await showFormDialog(`Edit ${item.name}`,[{name:'name',label:'Item name',value:item.name,required:true},{name:'description',label:'Description',value:item.description,type:'textarea'},{name:'categoryId',label:'Category',value:item.categoryId,type:'select',options:categories.map((entry:any)=>({label:entry.name,value:String(entry.id)}))},{name:'unitCost',label:'Unit cost (PHP ₱)',value:item.unitCost,type:'number',min:0,step:.01,required:true},{name:'reorderLevel',label:'Reorder level',value:item.reorderLevel,type:'number',min:0,required:true},{name:'maximumStock',label:'Maximum stock',value:item.maximumStock,type:'number',min:0}]);if(!values)return;try{await apiRequest(`/items/${item.id}`,{method:'PUT',body:JSON.stringify({name:values.name,description:values.description,categoryId:Number(values.categoryId),unitCost:Number(values.unitCost),reorderLevel:Number(values.reorderLevel),maximumStock:values.maximumStock?Number(values.maximumStock):null})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Item could not be updated.');}});
+    body.querySelectorAll<HTMLButtonElement>('.archive-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));if(!item)return;if(!await confirmAction(`Delete ${item.name}? Its transaction history will be preserved.`,'Delete inventory item'))return;try{await apiRequest(`/items/${item.id}`,{method:'DELETE'});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));const toast=document.querySelector<HTMLElement>('#toast');const toastText=document.querySelector<HTMLElement>('#toastText');if(toast&&toastText){toastText.textContent=`Item "${item.name}" deleted`;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),3500);}}catch(error){showError(error instanceof Error?error.message:'Item could not be deleted.','Delete item failed');}});
   }catch(error){body.innerHTML=empty(error instanceof ApiError&&error.status===401?'Please sign in to view inventory.':'Inventory could not be loaded.');}};
   root.querySelector<HTMLButtonElement>('#refreshItems')!.onclick=load;root.querySelector<HTMLButtonElement>('#addInventory')?.addEventListener('click',()=>document.querySelector<HTMLButtonElement>('#quickAdd')?.click());await load();
 }
@@ -110,19 +171,21 @@ async function categories(root:HTMLElement){
 async function categoriesStyled(root:HTMLElement){
   const session:any=await apiRequest('/auth/me');const isAdmin=session.user.role==='ADMIN';let all:any[]=[];let search='';let status='all';let sort='name-asc';let view:'grid'|'list'='grid';
   const categoryIcon=(index:number)=>{const symbols=[`<path d="M5 8.5 12 4l7 4.5v8L12 21l-7-4.5Z"/><path d="m5 8.5 7 4.5 7-4.5M12 13v8"/>`,`<path d="M4 7h16v13H4zM7 4h10v3M8 11h8M8 15h5"/>`,`<path d="m13 2-8 11h6l-1 9 9-12h-6Z"/>`,`<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M19 9h3M2 15h3M19 15h3"/>`,`<path d="M7 4h10v9a5 5 0 0 1-10 0ZM5 21l4-4M19 21l-4-4"/>`,`<path d="M4 6h16v14H4zM8 3h8v3M8 10h8M8 14h5"/>`];return`<svg viewBox="0 0 24 24" aria-hidden="true">${symbols[index%symbols.length]}</svg>`;};
-  root.innerHTML=shell('Categories','Organize your inventory using reusable categories.',isAdmin?button('addCategory','+ Add Category',true):'');root.querySelector('.module-view')?.classList.add('categories-view');
+  root.innerHTML=shell('Categories','Organize your inventory using reusable categories.');root.querySelector('.module-view')?.classList.add('categories-view');
   const render=()=>{const body=root.querySelector<HTMLElement>('.module-body')!;const active=all.filter(category=>Boolean(category.isActive)).length;const archived=all.length-active;const totalItems=all.reduce((sum,category)=>sum+Number(category.itemCount||0),0);let visible=all.filter(category=>(status==='all'||(status==='active')===Boolean(category.isActive))&&(category.name.toLowerCase().includes(search.toLowerCase())||String(category.description||'').toLowerCase().includes(search.toLowerCase())));visible=[...visible].sort((a,b)=>sort==='name-desc'?b.name.localeCompare(a.name):sort==='items-desc'?Number(b.itemCount)-Number(a.itemCount):sort==='items-asc'?Number(a.itemCount)-Number(b.itemCount):a.name.localeCompare(b.name));
-    body.innerHTML=`<section class="category-stats"><article><span class="category-stat-icon blue">${categoryIcon(0)}</span><div><small>Total Categories</small><b>${all.length}</b><p>${active} active categories</p></div></article><article><span class="category-stat-icon green">${categoryIcon(1)}</span><div><small>Active Categories</small><b>${active}</b><p>Currently in use</p></div></article><article><span class="category-stat-icon orange">${categoryIcon(5)}</span><div><small>Archived Categories</small><b>${archived}</b><p>${archived?'Kept for historical records':'No archived categories'}</p></div></article><article><span class="category-stat-icon purple">${categoryIcon(3)}</span><div><small>Total Items</small><b>${totalItems.toLocaleString()}</b><p>Across all categories</p></div></article></section>
-    <section class="category-toolbar"><label class="category-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input class="table-search" value="${esc(search)}" placeholder="Search categories..."></label><div class="category-toolbar-actions"><label><span>Status:</span><select class="category-status"><option value="all" ${status==='all'?'selected':''}>All</option><option value="active" ${status==='active'?'selected':''}>Active</option><option value="archived" ${status==='archived'?'selected':''}>Archived</option></select></label><label><span>Sort:</span><select class="category-sort"><option value="name-asc" ${sort==='name-asc'?'selected':''}>Name (A–Z)</option><option value="name-desc" ${sort==='name-desc'?'selected':''}>Name (Z–A)</option><option value="items-desc" ${sort==='items-desc'?'selected':''}>Most items</option><option value="items-asc" ${sort==='items-asc'?'selected':''}>Fewest items</option></select></label><div class="category-view-toggle"><button class="grid-view ${view==='grid'?'active':''}" aria-label="Grid view">▦</button><button class="list-view ${view==='list'?'active':''}" aria-label="List view">☷</button></div><button class="category-export">⇩ Export</button></div></section>
-    ${visible.length?`<section class="category-card-grid ${view==='list'?'list-mode':''}">${visible.map((category,index)=>`<article class="category-card"><div class="category-card-main"><span class="category-card-icon tone-${index%6}">${categoryIcon(index)}</span><div><div class="category-card-title"><h3>${esc(category.name)}</h3><span class="category-state ${category.isActive?'active':'archived'}">${category.isActive?'Active':'Archived'}</span></div><b>${Number(category.itemCount||0).toLocaleString()} items</b><p>${esc(category.description||'No description provided.')}</p></div></div><footer><button class="view-category-items" data-id="${category.id}">View Items</button>${isAdmin&&category.isActive?`<button class="edit-category" data-id="${category.id}">✎ Edit</button><button class="delete-category" data-id="${category.id}" aria-label="Delete ${esc(category.name)}"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M8 10v8M12 10v8M16 10v8M6 7l1 14h10l1-14"/></svg></button>`:''}</footer></article>`).join('')}</section>`:empty('No categories match the selected filters.')}`;
+    const toolbar=`<section class="category-toolbar"><label class="category-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input class="table-search" value="${esc(search)}" placeholder="Search categories..."></label><label><span>Status</span><select class="category-status"><option value="all" ${status==='all'?'selected':''}>All Statuses</option><option value="active" ${status==='active'?'selected':''}>Active</option><option value="archived" ${status==='archived'?'selected':''}>Archived</option></select></label><label><span>Sort by</span><select class="category-sort"><option value="name-asc" ${sort==='name-asc'?'selected':''}>Name: A–Z</option><option value="name-desc" ${sort==='name-desc'?'selected':''}>Name: Z–A</option><option value="items-desc" ${sort==='items-desc'?'selected':''}>Most items</option><option value="items-asc" ${sort==='items-asc'?'selected':''}>Fewest items</option></select></label><div class="category-toolbar-actions"><div class="category-view-toggle"><button class="grid-view ${view==='grid'?'active':''}" aria-label="Grid view">▦</button><button class="list-view ${view==='list'?'active':''}" aria-label="List view">☷</button></div><button class="category-export">⇩ Export</button>${isAdmin?`<button class="add-category-btn primary-action">+ Add Category</button>`:''}</div></section>`;
+    const stats=`<section class="category-stats"><article class="blue"><span>${categoryIcon(0)}</span><div><small>Total Categories</small><b>${all.length}</b><p>${active} active categories</p></div></article><article class="green"><span>${categoryIcon(1)}</span><div><small>Active Categories</small><b>${active}</b><p>Currently in use</p></div></article><article class="orange"><span>${categoryIcon(5)}</span><div><small>Archived Categories</small><b>${archived}</b><p>${archived?'Kept for historical records':'No archived categories'}</p></div></article><article class="purple"><span>${categoryIcon(3)}</span><div><small>Total Items</small><b>${totalItems.toLocaleString()}</b><p>Across all categories</p></div></article></section>`;
+    const grid=visible.length?`<section class="category-card-grid ${view==='list'?'list-mode':''}">${visible.map((category,index)=>`<article class="category-card"><div class="category-card-main"><span class="category-card-icon tone-${index%6}">${categoryIcon(index)}</span><div><div class="category-card-title"><h3>${esc(category.name)}</h3><span class="category-state ${category.isActive?'active':'archived'}">${category.isActive?'Active':'Archived'}</span></div><b>${Number(category.itemCount||0).toLocaleString()} items</b><p>${esc(category.description||'No description provided.')}</p></div></div><footer><button class="btn-action view-category-items" data-id="${category.id}">View Items</button>${isAdmin&&category.isActive?`<button class="btn-action edit-category" data-id="${category.id}">✎ Edit</button><button class="btn-action danger delete-category" data-id="${category.id}" aria-label="Delete ${esc(category.name)}">⌫ Delete</button>`:''}</footer></article>`).join('')}</section>`:empty('No categories match the selected filters.');
+    body.innerHTML=toolbar+stats+grid;
     const input=body.querySelector<HTMLInputElement>('.category-search input')!;bindSearch(input,value=>{search=value;render();});body.querySelector<HTMLSelectElement>('.category-status')!.onchange=event=>{status=(event.target as HTMLSelectElement).value;render();};body.querySelector<HTMLSelectElement>('.category-sort')!.onchange=event=>{sort=(event.target as HTMLSelectElement).value;render();};body.querySelector<HTMLButtonElement>('.grid-view')!.onclick=()=>{view='grid';render();};body.querySelector<HTMLButtonElement>('.list-view')!.onclick=()=>{view='list';render();};
     body.querySelector<HTMLButtonElement>('.category-export')!.onclick=()=>{const csv=['Category,Status,Items,Description',...visible.map(category=>[category.name,category.isActive?'Active':'Archived',category.itemCount||0,category.description||''].map(value=>`"${String(value).replaceAll('"','""')}"`).join(','))].join('\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));const link=document.createElement('a');link.href=url;link.download='stockhub-categories.csv';link.click();URL.revokeObjectURL(url);};
+    body.querySelector<HTMLButtonElement>('.add-category-btn')?.addEventListener('click',async()=>{const values=await showFormDialog('Create category',[{name:'name',label:'Category name',required:true},{name:'description',label:'Description',type:'textarea'}],'Create');if(!values)return;try{await apiRequest('/categories',{method:'POST',body:JSON.stringify(values)});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Category could not be created.');}});
     body.querySelectorAll<HTMLButtonElement>('.view-category-items').forEach(control=>control.onclick=()=>{sessionStorage.setItem('stockhub.inventoryCategory',String(control.dataset.id));const globalSearch=document.querySelector<HTMLInputElement>('#globalSearch');if(globalSearch)globalSearch.value='';document.querySelector<HTMLButtonElement>('.nav-item[data-label="Inventory"]')?.click();});
     body.querySelectorAll<HTMLButtonElement>('.edit-category').forEach(control=>control.onclick=async()=>{const category=all.find(entry=>entry.id===Number(control.dataset.id));const values=await showFormDialog('Edit category',[{name:'name',label:'Category name',value:category.name,required:true},{name:'description',label:'Description',value:category.description,type:'textarea'}]);if(!values)return;try{await apiRequest(`/categories/${category.id}`,{method:'PUT',body:JSON.stringify(values)});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Category could not be updated.');}});
     body.querySelectorAll<HTMLButtonElement>('.delete-category').forEach(control=>control.onclick=async()=>{const category=all.find(entry=>entry.id===Number(control.dataset.id));if(!await confirmAction(`Delete the “${category.name}” category? It will be archived and its item history will remain available.`,'Delete category'))return;try{await apiRequest(`/categories/${category.id}`,{method:'DELETE'});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Category could not be deleted.');}});
   };
   const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{all=await apiRequest('/categories?includeArchived=true');render();}catch{body.innerHTML=empty('Categories could not be loaded.');}};
-  root.querySelector<HTMLButtonElement>('#addCategory')?.addEventListener('click',async()=>{const values=await showFormDialog('Create category',[{name:'name',label:'Category name',required:true},{name:'description',label:'Description',type:'textarea'}],'Create');if(!values)return;try{await apiRequest('/categories',{method:'POST',body:JSON.stringify(values)});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Category could not be created.');}});await load();
+  await load();
 }
 
 async function locations(root:HTMLElement){
@@ -136,21 +199,610 @@ async function locations(root:HTMLElement){
 
 async function locationsStyled(root:HTMLElement){
   const session:any=await apiRequest('/auth/me');const isAdmin=session.user.role==='ADMIN';let all:any[]=[];let search='';let type='all';let status='all';let sort='util-desc';
-  const percent=(location:any)=>Number(location.maximumCapacity)>0?Math.round(Number(location.currentUsage)/Number(location.maximumCapacity)*100):0;const tone=(value:number)=>value>=95?'critical':value>=85?'high':value>=50?'moderate':'available';const toneLabel=(value:number)=>value>=95?'Critical':value>=85?'High Utilization':value>=50?'Moderate':'Available';
+  const percent=(location:any)=>Number(location.maximumCapacity)>0?Math.round(Number(location.currentUsage)/Number(location.maximumCapacity)*100):0;
+  const tone=(value:number)=>value>=95?'critical':value>=85?'high':value>=50?'moderate':'available';
+  const toneLabel=(value:number)=>value>=95?'Critical':value>=85?'High Utilization':value>=50?'Moderate':'Available';
   const locationIcon=(kind:string)=>kind==='near'?'<path d="M12 4v9M12 17h.01"/><path d="M10.3 3.7 2.2 18a2 2 0 0 0 1.8 3h16a2 2 0 0 0 1.8-3L13.7 3.7a2 2 0 0 0-3.4 0Z"/>':kind==='average'?'<path d="M4 19 9 13l4 3 7-9"/><path d="M16 7h4v4"/>':kind==='occupied'?'<circle cx="12" cy="12" r="9"/><path d="M12 3v9h9"/>':'<path d="m5 7 7-4 7 4-7 4Z"/><path d="M5 7v10l7 4 7-4V7M8 12h8M8 16h8"/>';
-  root.innerHTML=shell('Warehouse Locations','Monitor capacity and utilization across all physical storage locations.');root.querySelector('.module-view')?.classList.add('locations-view');
-  const render=()=>{const body=root.querySelector<HTMLElement>('.module-body')!;const locations=all.filter(location=>location.locationType!=='WAREHOUSE');const occupied=locations.filter(location=>Number(location.currentUsage)>0).length;const average=locations.length?Math.round(locations.reduce((sum,location)=>sum+percent(location),0)/locations.length):0;const near=locations.filter(location=>percent(location)>=85).length;let visible=locations.filter(location=>(type==='all'||location.locationType===type)&&(status==='all'||tone(percent(location))===status)&&(location.name.toLowerCase().includes(search.toLowerCase())||location.code.toLowerCase().includes(search.toLowerCase())||String(location.parentName||'').toLowerCase().includes(search.toLowerCase())));visible=[...visible].sort((a,b)=>sort==='name-asc'?a.name.localeCompare(b.name):sort==='name-desc'?b.name.localeCompare(a.name):sort==='capacity-desc'?Number(b.maximumCapacity)-Number(a.maximumCapacity):percent(b)-percent(a));
-    const toolbar=`<section class="location-toolbar"><label class="location-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input class="table-search" value="${esc(search)}" placeholder="Search locations..."></label><label><span>Type</span><select class="location-type"><option value="all">All Types</option>${['SECTION','SLOT','STORAGE'].map(value=>`<option value="${value}" ${type===value?'selected':''}>${value[0]+value.slice(1).toLowerCase()}</option>`).join('')}</select></label><label><span>Status</span><select class="location-status"><option value="all">All Statuses</option><option value="available" ${status==='available'?'selected':''}>Available</option><option value="moderate" ${status==='moderate'?'selected':''}>Moderate</option><option value="high" ${status==='high'?'selected':''}>High Utilization</option><option value="critical" ${status==='critical'?'selected':''}>Critical</option></select></label><label><span>Sort by</span><select class="location-sort"><option value="util-desc">Utilization: High to Low</option><option value="name-asc" ${sort==='name-asc'?'selected':''}>Name: A–Z</option><option value="name-desc" ${sort==='name-desc'?'selected':''}>Name: Z–A</option><option value="capacity-desc" ${sort==='capacity-desc'?'selected':''}>Capacity: High to Low</option></select></label><div class="location-toolbar-buttons"><button class="refresh-locations">↻ Refresh</button>${isAdmin?'<button class="add-location">+ Add Location</button>':''}</div></section>`;
-    const stats=`<section class="location-stats"><article><span class="location-stat-icon blue"><svg viewBox="0 0 24 24">${locationIcon('total')}</svg></span><div><small>Total Locations</small><b>${locations.length}</b><p>${locations.filter(location=>location.locationType==='SECTION').length} Sections · ${locations.filter(location=>location.locationType==='SLOT').length} Slots</p></div></article><article><span class="location-stat-icon green"><svg viewBox="0 0 24 24">${locationIcon('occupied')}</svg></span><div><small>Occupied Locations</small><b>${occupied}</b><p>${locations.length?Math.round(occupied/locations.length*100):0}% of total locations</p></div></article><article><span class="location-stat-icon orange"><svg viewBox="0 0 24 24">${locationIcon('average')}</svg></span><div><small>Average Utilization</small><b>${average}%</b><p>Across all locations</p></div></article><article><span class="location-stat-icon red"><svg viewBox="0 0 24 24">${locationIcon('near')}</svg></span><div><small>Near Capacity</small><b>${near}</b><p>Requiring attention</p></div></article></section>`;
-    const cards=visible.length?`<section class="location-card-grid">${visible.map(location=>{const used=percent(location);const level=tone(used);return`<article class="location-manage-card ${location.locationType==='SECTION'?'section-card':'slot-card'} ${level}"><header><div><span class="location-type-badge">${esc(location.locationType)}</span><h3>${esc(location.name)} <small>${esc(location.code)}</small></h3>${location.parentName?`<p>Parent: ${esc(location.parentName)}</p>`:''}</div><span class="location-state"><i></i>${toneLabel(used)}</span></header><div class="location-capacity-row"><strong>${used}%</strong><span><i style="width:${Math.min(100,used)}%"></i></span><b>${Number(location.currentUsage).toLocaleString()} / ${Number(location.maximumCapacity).toLocaleString()} units</b></div><div class="location-card-meta">${Number(location.childCount)>0?`<span>▦ ${location.childCount} Slots</span>`:''}<span>◇ ${Number(location.skuCount).toLocaleString()} SKUs</span><span>⬡ ${Number(location.currentUsage).toLocaleString()} Units</span></div><footer><button class="view-location" data-id="${location.id}">◉ View</button>${isAdmin?`<button class="edit-location-card" data-id="${location.id}">✎ Edit</button><button class="delete-location-card" data-id="${location.id}">⌫ Delete</button>`:''}</footer></article>`;}).join('')}</section>`:empty('No locations match the selected filters.');
-    body.innerHTML=toolbar+stats+cards;const input=body.querySelector<HTMLInputElement>('.location-search input')!;bindSearch(input,value=>{search=value;render();});body.querySelector<HTMLSelectElement>('.location-type')!.onchange=event=>{type=(event.target as HTMLSelectElement).value;render();};body.querySelector<HTMLSelectElement>('.location-status')!.onchange=event=>{status=(event.target as HTMLSelectElement).value;render();};body.querySelector<HTMLSelectElement>('.location-sort')!.onchange=event=>{sort=(event.target as HTMLSelectElement).value;render();};body.querySelector<HTMLButtonElement>('.refresh-locations')!.onclick=load;
-    body.querySelector<HTMLButtonElement>('.add-location')?.addEventListener('click',async()=>{const values=await showFormDialog('Create location',[{name:'code',label:'Location code',required:true},{name:'name',label:'Location name',required:true},{name:'locationType',label:'Location type',type:'select',options:['WAREHOUSE','SECTION','SLOT','STORAGE'].map(value=>({label:value,value}))},{name:'parentLocationId',label:'Parent location',type:'select',options:[{label:'None',value:''},...all.map(location=>({label:`${location.name} (${location.code})`,value:String(location.id)}))]},{name:'maximumCapacity',label:'Maximum capacity',type:'number',min:0,required:true},{name:'description',label:'Description',type:'textarea'}],'Create');if(!values)return;try{await apiRequest('/locations',{method:'POST',body:JSON.stringify({code:values.code,name:values.name,locationType:values.locationType,parentLocationId:values.parentLocationId?Number(values.parentLocationId):null,maximumCapacity:Number(values.maximumCapacity),description:values.description})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Location could not be created.');}});
+
+  root.innerHTML=shell('Warehouse Locations','Monitor capacity and utilization across all physical storage locations.');
+  root.querySelector('.module-view')?.classList.add('locations-view');
+
+  const render=()=>{
+    const body=root.querySelector<HTMLElement>('.module-body')!;
+    const warehouses=all.filter(l=>l.locationType==='WAREHOUSE');
+    const warehouseIds=new Set(warehouses.map(w=>w.id));
+    const sections=all.filter(l=>l.locationType==='SECTION'||(l.locationType!=='WAREHOUSE'&&(l.parentLocationId===null||warehouseIds.has(l.parentLocationId)||Number(l.childCount)>0)));
+    const sectionIds=new Set(sections.map(s=>s.id));
+    const slots=all.filter(l=>l.locationType==='SLOT'||l.locationType==='STORAGE'||(!warehouseIds.has(l.id)&&!sectionIds.has(l.id)));
+
+    const occupied=all.filter(l=>Number(l.currentUsage)>0).length;
+    const average=all.length?Math.round(all.reduce((sum,l)=>sum+percent(l),0)/all.length):0;
+    const near=all.filter(l=>percent(l)>=85).length;
+
+    const toolbar=`<section class="location-toolbar">
+      <label class="location-search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input class="table-search" value="${esc(search)}" placeholder="Search locations, warehouses...">
+      </label>
+      <label>
+        <span>Type</span>
+        <select class="location-type">
+          <option value="all" ${type==='all'?'selected':''}>All Types</option>
+          <option value="WAREHOUSE" ${type==='WAREHOUSE'?'selected':''}>Warehouses</option>
+          <option value="SECTION" ${type==='SECTION'?'selected':''}>Sections</option>
+          <option value="SLOT" ${type==='SLOT'?'selected':''}>Slots</option>
+          <option value="STORAGE" ${type==='STORAGE'?'selected':''}>Storage</option>
+        </select>
+      </label>
+      <label>
+        <span>Status</span>
+        <select class="location-status">
+          <option value="all" ${status==='all'?'selected':''}>All Statuses</option>
+          <option value="available" ${status==='available'?'selected':''}>Available</option>
+          <option value="moderate" ${status==='moderate'?'selected':''}>Moderate</option>
+          <option value="high" ${status==='high'?'selected':''}>High Utilization</option>
+          <option value="critical" ${status==='critical'?'selected':''}>Critical</option>
+        </select>
+      </label>
+      <label>
+        <span>Sort by</span>
+        <select class="location-sort">
+          <option value="util-desc" ${sort==='util-desc'?'selected':''}>Utilization: High to Low</option>
+          <option value="name-asc" ${sort==='name-asc'?'selected':''}>Name: A–Z</option>
+          <option value="name-desc" ${sort==='name-desc'?'selected':''}>Name: Z–A</option>
+          <option value="capacity-desc" ${sort==='capacity-desc'?'selected':''}>Capacity: High to Low</option>
+        </select>
+      </label>
+      <div class="location-toolbar-buttons">
+        <button class="refresh-locations">↻ Refresh</button>
+        ${isAdmin?`
+          <button class="add-warehouse-btn">🏢 + Add Warehouse</button>
+          <button class="add-location">+ Add Location</button>
+        `:''}
+      </div>
+    </section>`;
+
+    const stats=`<section class="location-stats">
+      <article class="blue">
+        <span><svg viewBox="0 0 24 24">${locationIcon('total')}</svg></span>
+        <div>
+          <small>Total Facilities & Locations</small>
+          <b>${all.length}</b>
+          <p>${warehouses.length} Warehouse${warehouses.length===1?'':'s'} · ${sections.length} Section${sections.length===1?'':'s'} · ${slots.length} Slot${slots.length===1?'':'s'}</p>
+        </div>
+      </article>
+      <article class="green">
+        <span><svg viewBox="0 0 24 24">${locationIcon('occupied')}</svg></span>
+        <div>
+          <small>Occupied Facilities</small>
+          <b>${occupied}</b>
+          <p>${all.length?Math.round(occupied/all.length*100):0}% of all facilities</p>
+        </div>
+      </article>
+      <article class="orange">
+        <span><svg viewBox="0 0 24 24">${locationIcon('average')}</svg></span>
+        <div>
+          <small>Average Utilization</small>
+          <b>${average}%</b>
+          <p>Across all facilities</p>
+        </div>
+      </article>
+      <article class="red">
+        <span><svg viewBox="0 0 24 24">${locationIcon('near')}</svg></span>
+        <div>
+          <small>Near Capacity</small>
+          <b>${near}</b>
+          <p>Requiring attention</p>
+        </div>
+      </article>
+    </section>`;
+
+    const warehouseSectionsMap=new Map<number,any[]>();
+    warehouses.forEach(w=>warehouseSectionsMap.set(w.id,[]));
+    const sectionSlotsMap=new Map<number,any[]>();
+    sections.forEach(s=>sectionSlotsMap.set(s.id,[]));
+    const standaloneSections:any[]=[];
+
+    sections.forEach(sec=>{
+      if(sec.parentLocationId&&warehouseSectionsMap.has(sec.parentLocationId)){
+        warehouseSectionsMap.get(sec.parentLocationId)!.push(sec);
+      }else{
+        standaloneSections.push(sec);
+      }
+    });
+
+    slots.forEach(slot=>{
+      if(slot.parentLocationId&&sectionSlotsMap.has(slot.parentLocationId)){
+        sectionSlotsMap.get(slot.parentLocationId)!.push(slot);
+      }else if(slot.parentLocationId&&warehouseSectionsMap.has(slot.parentLocationId)){
+        warehouseSectionsMap.get(slot.parentLocationId)!.push(slot);
+      }
+    });
+
+    const query=search.trim().toLowerCase();
+    const matchesFilter=(loc:any)=>{
+      const pct=percent(loc);
+      const lvl=tone(pct);
+      const matchesSearch=!query||loc.name.toLowerCase().includes(query)||loc.code.toLowerCase().includes(query)||String(loc.parentName||'').toLowerCase().includes(query)||String(loc.description||'').toLowerCase().includes(query);
+      const matchesType=type==='all'||loc.locationType===type;
+      const matchesStatus=status==='all'||lvl===status;
+      return matchesSearch&&matchesType&&matchesStatus;
+    };
+
+    const sortFn=(a:any,b:any)=>{
+      if(sort==='name-asc')return a.name.localeCompare(b.name);
+      if(sort==='name-desc')return b.name.localeCompare(a.name);
+      if(sort==='capacity-desc')return Number(b.maximumCapacity)-Number(a.maximumCapacity);
+      return percent(b)-percent(a);
+    };
+
+    const renderSection=(section:any)=>{
+      const secSlots=sectionSlotsMap.get(section.id)??[];
+      const secUsed=percent(section);
+      const secLevel=tone(secUsed);
+      const matchingSlots=(query||status!=='all'||(type!=='all'&&type!=='SECTION'))?secSlots.filter(s=>matchesFilter(s)):secSlots;
+
+      return `
+      <div class="location-group ${secLevel}" data-group-id="${section.id}" style="margin-bottom:12px;">
+        <div class="location-parent-card">
+          <div class="location-parent-main">
+            <div class="location-parent-identity">
+              <span class="parent-type-badge">${esc(section.locationType)}</span>
+              <div class="location-title-wrap">
+                <h3>${esc(section.name)}</h3>
+                <span class="location-code-tag">${esc(section.code)}</span>
+              </div>
+              ${section.description?`<p class="location-desc">${esc(section.description)}</p>`:''}
+            </div>
+
+            <div class="location-parent-stats">
+              <div class="location-metric-pill">
+                <small>Occupancy</small>
+                <b class="${secLevel}">${secUsed}%</b>
+              </div>
+              <div class="location-progress-wrap">
+                <div class="location-progress-bar">
+                  <i class="${secLevel}" style="width:${Math.min(100,secUsed)}%"></i>
+                </div>
+                <div class="location-units-info">
+                  <span><b>${Number(section.currentUsage).toLocaleString()}</b> / ${Number(section.maximumCapacity).toLocaleString()} units</span>
+                  <span class="location-state-chip ${secLevel}"><i></i>${toneLabel(secUsed)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="location-parent-actions">
+            <div class="location-meta-tags">
+              <span class="meta-tag">▦ ${secSlots.length} Slots</span>
+              <span class="meta-tag">◇ ${Number(section.skuCount).toLocaleString()} SKUs</span>
+            </div>
+            <div class="parent-btn-group">
+              <button class="btn-action view-location" data-id="${section.id}" title="View section details">◉ View</button>
+              ${isAdmin?`
+                <button class="btn-action edit-location-card" data-id="${section.id}" title="Edit section">✎ Edit</button>
+                <button class="btn-action add-sub-location" data-parent-id="${section.id}" data-parent-name="${esc(section.name)}" title="Add slot under ${esc(section.name)}">+ Add Slot</button>
+                <button class="btn-action danger delete-location-card" data-id="${section.id}" title="Delete section">⌫ Delete</button>
+              `:''}
+              <button class="btn-action toggle-group" data-target="${section.id}" title="Toggle slots">▼</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="location-children-wrap" id="children-${section.id}">
+          <div class="location-tree-stem">
+            <div class="tree-line"></div>
+            <div class="tree-content">
+              ${matchingSlots.length?`
+                <div class="location-children-grid">
+                  ${matchingSlots.map(child=>{
+                    const childPct=percent(child);
+                    const childTone=tone(childPct);
+                    return `
+                    <article class="location-child-card ${childTone}">
+                      <div class="child-card-header">
+                        <div class="child-branch-indicator">
+                          <span class="branch-icon">↳</span>
+                          <span class="child-type-tag">${esc(child.locationType)}</span>
+                        </div>
+                        <span class="child-state-dot ${childTone}" title="${toneLabel(childPct)}"></span>
+                      </div>
+
+                      <div class="child-card-body">
+                        <h4>${esc(child.name)}</h4>
+                        <code class="child-code">${esc(child.code)}</code>
+                        ${child.description?`<p class="child-desc">${esc(child.description)}</p>`:''}
+
+                        <div class="child-capacity-meter">
+                          <div class="child-meter-row">
+                            <strong>${childPct}%</strong>
+                            <span>${Number(child.currentUsage).toLocaleString()} / ${Number(child.maximumCapacity).toLocaleString()} units</span>
+                          </div>
+                          <div class="child-progress"><i class="${childTone}" style="width:${Math.min(100,childPct)}%"></i></div>
+                        </div>
+
+                        <div class="child-card-meta">
+                          <span>◇ ${Number(child.skuCount).toLocaleString()} SKUs</span>
+                        </div>
+                      </div>
+
+                      <div class="child-card-footer">
+                        <button class="btn-sub-action view-location" data-id="${child.id}">View</button>
+                        ${isAdmin?`
+                          <button class="btn-sub-action edit-location-card" data-id="${child.id}">Edit</button>
+                          <button class="btn-sub-action danger delete-location-card" data-id="${child.id}">Delete</button>
+                        `:''}
+                      </div>
+                    </article>
+                    `;
+                  }).join('')}
+                </div>
+              `:`
+                <div class="empty-sublocations">
+                  <span class="empty-sub-icon">↳</span>
+                  <span>No sub-locations configured in this section.</span>
+                  ${isAdmin?`<button class="add-sub-location text-btn" data-parent-id="${section.id}" data-parent-name="${esc(section.name)}">+ Add first slot</button>`:''}
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+      </div>
+      `;
+    };
+
+    const visibleWarehouseCards:string[]=[];
+    const sortedWarehouses=[...warehouses].sort(sortFn);
+
+    sortedWarehouses.forEach(wh=>{
+      const whSections=(warehouseSectionsMap.get(wh.id)??[]).sort(sortFn);
+      const whMatches=matchesFilter(wh);
+      const matchingSections=whSections.filter(sec=>{
+        const secMatches=matchesFilter(sec);
+        const secSlots=sectionSlotsMap.get(sec.id)??[];
+        const anySlotMatches=secSlots.some(s=>matchesFilter(s));
+        return secMatches||anySlotMatches;
+      });
+
+      if(type==='WAREHOUSE'){
+        if(whMatches){
+          const whUsed=percent(wh);
+          const whLevel=tone(whUsed);
+          visibleWarehouseCards.push(`
+          <div class="location-group facility-warehouse ${whLevel}" data-group-id="${wh.id}">
+            <div class="location-parent-card facility-header">
+              <div class="location-parent-main">
+                <div class="location-parent-identity">
+                  <span class="facility-type-badge">🏢 WAREHOUSE FACILITY</span>
+                  <div class="location-title-wrap">
+                    <h3>${esc(wh.name)}</h3>
+                    <span class="location-code-tag">${esc(wh.code)}</span>
+                  </div>
+                  ${wh.description?`<p class="location-desc">${esc(wh.description)}</p>`:''}
+                </div>
+
+                <div class="location-parent-stats">
+                  <div class="location-metric-pill">
+                    <small>Occupancy</small>
+                    <b class="${whLevel}">${whUsed}%</b>
+                  </div>
+                  <div class="location-progress-wrap">
+                    <div class="location-progress-bar">
+                      <i class="${whLevel}" style="width:${Math.min(100,whUsed)}%"></i>
+                    </div>
+                    <div class="location-units-info">
+                      <span><b>${Number(wh.currentUsage).toLocaleString()}</b> / ${Number(wh.maximumCapacity).toLocaleString()} units</span>
+                      <span class="location-state-chip ${whLevel}"><i></i>${toneLabel(whUsed)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="location-parent-actions">
+                <div class="location-meta-tags">
+                  <span class="meta-tag">🏢 ${whSections.length} Sections</span>
+                  <span class="meta-tag">◇ ${Number(wh.skuCount).toLocaleString()} SKUs</span>
+                </div>
+                <div class="parent-btn-group">
+                  <button class="btn-action view-location" data-id="${wh.id}" title="View warehouse details">◉ View</button>
+                  ${isAdmin?`
+                    <button class="btn-action edit-location-card" data-id="${wh.id}" title="Edit warehouse">✎ Edit</button>
+                    <button class="btn-action add-section-btn" data-warehouse-id="${wh.id}" data-warehouse-name="${esc(wh.name)}" title="Add section under ${esc(wh.name)}">+ Add Section</button>
+                    <button class="btn-action danger delete-location-card" data-id="${wh.id}" title="Delete warehouse">⌫ Delete</button>
+                  `:''}
+                </div>
+              </div>
+            </div>
+          </div>
+          `);
+        }
+        return;
+      }
+
+      if(whMatches||matchingSections.length>0){
+        const sectionsToRender=(query||status!=='all'||type!=='all')?matchingSections:whSections;
+        const whUsed=percent(wh);
+        const whLevel=tone(whUsed);
+
+        visibleWarehouseCards.push(`
+        <div class="location-group facility-warehouse ${whLevel}" data-group-id="${wh.id}">
+          <div class="location-parent-card facility-header">
+            <div class="location-parent-main">
+              <div class="location-parent-identity">
+                <span class="facility-type-badge">🏢 WAREHOUSE FACILITY</span>
+                <div class="location-title-wrap">
+                  <h3>${esc(wh.name)}</h3>
+                  <span class="location-code-tag">${esc(wh.code)}</span>
+                </div>
+                ${wh.description?`<p class="location-desc">${esc(wh.description)}</p>`:''}
+              </div>
+
+              <div class="location-parent-stats">
+                <div class="location-metric-pill">
+                  <small>Occupancy</small>
+                  <b class="${whLevel}">${whUsed}%</b>
+                </div>
+                <div class="location-progress-wrap">
+                  <div class="location-progress-bar">
+                    <i class="${whLevel}" style="width:${Math.min(100,whUsed)}%"></i>
+                  </div>
+                  <div class="location-units-info">
+                    <span><b>${Number(wh.currentUsage).toLocaleString()}</b> / ${Number(wh.maximumCapacity).toLocaleString()} units</span>
+                    <span class="location-state-chip ${whLevel}"><i></i>${toneLabel(whUsed)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="location-parent-actions">
+              <div class="location-meta-tags">
+                <span class="meta-tag">🏢 ${whSections.length} Sections</span>
+                <span class="meta-tag">◇ ${Number(wh.skuCount).toLocaleString()} SKUs</span>
+              </div>
+              <div class="parent-btn-group">
+                <button class="btn-action view-location" data-id="${wh.id}" title="View warehouse details">◉ View</button>
+                ${isAdmin?`
+                  <button class="btn-action edit-location-card" data-id="${wh.id}" title="Edit warehouse">✎ Edit</button>
+                  <button class="btn-action add-section-btn" data-warehouse-id="${wh.id}" data-warehouse-name="${esc(wh.name)}" title="Add section under ${esc(wh.name)}">+ Add Section</button>
+                  <button class="btn-action danger delete-location-card" data-id="${wh.id}" title="Delete warehouse">⌫ Delete</button>
+                `:''}
+                <button class="btn-action toggle-group" data-target="${wh.id}" title="Toggle warehouse sections">▼</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="location-children-wrap facility-sections" id="children-${wh.id}">
+            <div class="location-tree-stem">
+              <div class="tree-line"></div>
+              <div class="tree-content">
+                ${sectionsToRender.length?`
+                  <div class="warehouse-sections-list" style="display:flex; flex-direction:column; gap:12px;">
+                    ${sectionsToRender.map(renderSection).join('')}
+                  </div>
+                `:`
+                  <div class="empty-sublocations">
+                    <span class="empty-sub-icon">🏢</span>
+                    <span>No storage sections configured in this warehouse facility.</span>
+                    ${isAdmin?`<button class="add-section-btn text-btn" data-warehouse-id="${wh.id}" data-warehouse-name="${esc(wh.name)}">+ Add first section</button>`:''}
+                  </div>
+                `}
+              </div>
+            </div>
+          </div>
+        </div>
+        `);
+      }
+    });
+
+    if(standaloneSections.length>0&&type!=='WAREHOUSE'){
+      const matchingStandalone=standaloneSections.filter(sec=>{
+        const secMatches=matchesFilter(sec);
+        const secSlots=sectionSlotsMap.get(sec.id)??[];
+        const anySlotMatches=secSlots.some(s=>matchesFilter(s));
+        return secMatches||anySlotMatches;
+      }).sort(sortFn);
+
+      if(matchingStandalone.length>0){
+        visibleWarehouseCards.push(`
+        <div class="location-group" data-group-id="-1">
+          <div class="location-parent-card">
+            <div class="location-parent-main">
+              <div class="location-parent-identity">
+                <span class="parent-type-badge">STANDALONE SECTIONS</span>
+                <div class="location-title-wrap">
+                  <h3>Unassigned Sections & Storage</h3>
+                  <span class="location-code-tag">GENERAL</span>
+                </div>
+                <p class="location-desc">Storage sections operating independently without parent warehouse assignment</p>
+              </div>
+            </div>
+            <div class="location-parent-actions">
+              <div class="location-meta-tags">
+                <span class="meta-tag">▦ ${matchingStandalone.length} Sections</span>
+              </div>
+              <button class="btn-action toggle-group" data-target="-1" title="Toggle sections">▼</button>
+            </div>
+          </div>
+
+          <div class="location-children-wrap" id="children--1">
+            <div class="location-tree-stem">
+              <div class="tree-line"></div>
+              <div class="tree-content">
+                <div class="warehouse-sections-list" style="display:flex; flex-direction:column; gap:12px;">
+                  ${matchingStandalone.map(renderSection).join('')}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        `);
+      }
+    }
+
+    const cards=visibleWarehouseCards.length
+      ?`<section class="location-hierarchy">${visibleWarehouseCards.join('')}</section>`
+      :empty('No locations or warehouse facilities match the selected filters.');
+
+    body.innerHTML=toolbar+stats+cards;
+
+    const input=body.querySelector<HTMLInputElement>('.location-search input')!;
+    bindSearch(input,value=>{search=value;render();});
+    body.querySelector<HTMLSelectElement>('.location-type')!.onchange=event=>{type=(event.target as HTMLSelectElement).value;render();};
+    body.querySelector<HTMLSelectElement>('.location-status')!.onchange=event=>{status=(event.target as HTMLSelectElement).value;render();};
+    body.querySelector<HTMLSelectElement>('.location-sort')!.onchange=event=>{sort=(event.target as HTMLSelectElement).value;render();};
+    body.querySelector<HTMLButtonElement>('.refresh-locations')!.onclick=load;
+
+    body.querySelectorAll<HTMLButtonElement>('.toggle-group').forEach(btn=>{
+      btn.onclick=(e)=>{
+        e.stopPropagation();
+        const group=btn.closest('.location-group');
+        group?.classList.toggle('collapsed');
+      };
+    });
+
+    const openCreateWarehouseDialog=async()=>{
+      const values=await showFormDialog('Provision Warehouse Facility',[
+        {name:'code',label:'Warehouse Code',placeholder:'e.g. WH-NORTH',required:true},
+        {name:'name',label:'Warehouse Name',placeholder:'e.g. North Logistics Center',required:true},
+        {name:'maximumCapacity',label:'Total Facility Capacity (Units)',type:'number',min:0,required:true},
+        {name:'description',label:'Facility Address / Description',type:'textarea',placeholder:'Physical building address, bay specifications, or notes'}
+      ],'Provision Warehouse');
+      if(!values)return;
+      try{
+        await apiRequest('/locations',{
+          method:'POST',
+          body:JSON.stringify({
+            code:values.code,
+            name:values.name,
+            locationType:'WAREHOUSE',
+            parentLocationId:null,
+            maximumCapacity:Number(values.maximumCapacity),
+            description:values.description
+          })
+        });
+        await load();
+        window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));
+      }catch(error){
+        showError(error instanceof Error?error.message:'Warehouse facility could not be created.');
+      }
+    };
+
+    const openCreateLocationDialog=async(defaultParentId?:string,defaultType:string='SECTION')=>{
+      const parentOptions:Array<{label:string;value:string}>=[{label:'None (Root Section)',value:''}];
+      warehouses.forEach(w=>{
+        parentOptions.push({label:`🏢 Warehouse: ${w.name} (${w.code})`,value:String(w.id)});
+      });
+      sections.forEach(s=>{
+        parentOptions.push({label:`  ↳ Section: ${s.name} (${s.code})`,value:String(s.id)});
+      });
+
+      const values=await showFormDialog('Create Storage Location',[
+        {name:'code',label:'Location Code',placeholder:'e.g. SEC-B or SLOT-B1',required:true},
+        {name:'name',label:'Location Name',placeholder:'e.g. Receiving Bay or Shelf Rack 1',required:true},
+        {
+          name:'locationType',
+          label:'Location Type',
+          type:'select',
+          value:defaultType,
+          options:[
+            {label:'Section / Zone',value:'SECTION'},
+            {label:'Slot / Bin',value:'SLOT'},
+            {label:'Storage Area',value:'STORAGE'}
+          ]
+        },
+        {
+          name:'parentLocationId',
+          label:'Parent Facility / Section',
+          type:'select',
+          value:defaultParentId??'',
+          options:parentOptions
+        },
+        {name:'maximumCapacity',label:'Maximum Capacity (Units)',type:'number',min:0,required:true},
+        {name:'description',label:'Description',type:'textarea'}
+      ],'Create Location');
+      if(!values)return;
+      try{
+        await apiRequest('/locations',{
+          method:'POST',
+          body:JSON.stringify({
+            code:values.code,
+            name:values.name,
+            locationType:values.locationType,
+            parentLocationId:values.parentLocationId?Number(values.parentLocationId):null,
+            maximumCapacity:Number(values.maximumCapacity),
+            description:values.description
+          })
+        });
+        await load();
+        window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));
+      }catch(error){
+        showError(error instanceof Error?error.message:'Location could not be created.');
+      }
+    };
+
+    body.querySelector<HTMLButtonElement>('.add-warehouse-btn')?.addEventListener('click',()=>openCreateWarehouseDialog());
+    body.querySelector<HTMLButtonElement>('.add-location')?.addEventListener('click',()=>openCreateLocationDialog());
+    body.querySelectorAll<HTMLButtonElement>('.add-section-btn').forEach(btn=>{
+      btn.onclick=(e)=>{
+        e.stopPropagation();
+        openCreateLocationDialog(btn.dataset.warehouseId,'SECTION');
+      };
+    });
+    body.querySelectorAll<HTMLButtonElement>('.add-sub-location').forEach(btn=>{
+      btn.onclick=(e)=>{
+        e.stopPropagation();
+        openCreateLocationDialog(btn.dataset.parentId,'SLOT');
+      };
+    });
     body.querySelectorAll<HTMLButtonElement>('.view-location').forEach(control=>control.onclick=()=>window.dispatchEvent(new CustomEvent('stockhub:view-location',{detail:{id:Number(control.dataset.id)}})));
-    body.querySelectorAll<HTMLButtonElement>('.edit-location-card').forEach(control=>control.onclick=async()=>{const location=all.find(entry=>entry.id===Number(control.dataset.id));const values=await showFormDialog('Edit location',[{name:'name',label:'Location name',value:location.name,required:true},{name:'maximumCapacity',label:'Maximum capacity',value:location.maximumCapacity,type:'number',min:0,required:true},{name:'description',label:'Description',value:location.description,type:'textarea'}]);if(!values)return;try{await apiRequest(`/locations/${location.id}`,{method:'PUT',body:JSON.stringify({name:values.name,maximumCapacity:Number(values.maximumCapacity),description:values.description})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Location could not be updated.');}});
-    body.querySelectorAll<HTMLButtonElement>('.delete-location-card').forEach(control=>control.onclick=async()=>{const location=all.find(entry=>entry.id===Number(control.dataset.id));if(!await confirmAction(`Delete ${location.name}? Empty sublocations will also be removed from active use.`,'Delete location'))return;try{await apiRequest(`/locations/${location.id}`,{method:'DELETE'});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Location could not be deleted.');}});
+    body.querySelectorAll<HTMLButtonElement>('.edit-location-card').forEach(control=>control.onclick=async()=>{
+      const location=all.find(entry=>entry.id===Number(control.dataset.id));
+      if(!location)return;
+      const isWh=location.locationType==='WAREHOUSE';
+      const values=await showFormDialog(isWh?'Edit Warehouse Facility':'Edit Location',[
+        {name:'name',label:isWh?'Warehouse Name':'Location Name',value:location.name,required:true},
+        {name:'maximumCapacity',label:'Maximum Capacity (Units)',value:location.maximumCapacity,type:'number',min:0,required:true},
+        {name:'description',label:isWh?'Facility Address / Description':'Description',value:location.description,type:'textarea'}
+      ]);
+      if(!values)return;
+      try{
+        await apiRequest(`/locations/${location.id}`,{method:'PUT',body:JSON.stringify({name:values.name,maximumCapacity:Number(values.maximumCapacity),description:values.description})});
+        await load();
+        window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));
+      }catch(error){
+        showError(error instanceof Error?error.message:'Location could not be updated.');
+      }
+    });
+    body.querySelectorAll<HTMLButtonElement>('.delete-location-card').forEach(control=>control.onclick=async()=>{
+      const location=all.find(entry=>entry.id===Number(control.dataset.id));
+      if(!location)return;
+      const isWh=location.locationType==='WAREHOUSE';
+      const message=isWh
+        ?`Delete warehouse ${location.name}? All empty child sections and slots will also be removed. Active items will prevent deletion.`
+        :`Delete ${location.name}? Empty sublocations will also be removed from active use.`;
+      if(!await confirmAction(message,isWh?'Delete Warehouse':'Delete Location'))return;
+      try{
+        await apiRequest(`/locations/${location.id}`,{method:'DELETE'});
+        await load();
+        window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));
+      }catch(error){
+        showError(error instanceof Error?error.message:'Location could not be deleted.');
+      }
+    });
   };
-  const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{all=await apiRequest('/locations');render();}catch{body.innerHTML=empty('Locations could not be loaded.');}};await load();
+
+  const load=async()=>{
+    const body=root.querySelector<HTMLElement>('.module-body')!;
+    try{
+      all=await apiRequest('/locations');
+      render();
+    }catch{
+      body.innerHTML=empty('Locations could not be loaded.');
+    }
+  };
+  await load();
 }
+
 
 async function reports(root:HTMLElement){root.innerHTML=shell('Reports','Live inventory valuation and category breakdown.',button('refreshReports','Refresh'));const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{const [summary,categories]:any[]=await Promise.all([apiRequest('/reports/inventory-summary'),apiRequest('/reports/category-breakdown')]);body.innerHTML=`<div class="report-stats"><article><span>Total Items</span><b>${esc(summary.totalItems)}</b></article><article><span>Total Units</span><b>${esc(summary.totalUnits)}</b></article><article><span>Inventory Value</span><b>${formatPeso(summary.inventoryValue)}</b></article><article><span>Low / Out</span><b>${esc(summary.lowStockItems)} / ${esc(summary.outOfStockItems)}</b></article></div><div class="module-table-wrap"><table class="module-table"><thead><tr><th>Category</th><th>SKUs</th><th>Units</th><th>Value (PHP)</th></tr></thead><tbody>${categories.map((c:any)=>`<tr><td>${esc(c.category)}</td><td>${esc(c.skuCount)}</td><td>${esc(c.totalUnits)}</td><td>${formatPeso(c.inventoryValue)}</td></tr>`).join('')}</tbody></table></div>`;}catch{body.innerHTML=empty('Reports could not be loaded.');}};root.querySelector<HTMLButtonElement>('#refreshReports')!.onclick=load;await load();}
 
@@ -162,4 +814,527 @@ async function reportsPaged(root:HTMLElement){
   const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{const results:any[]=await Promise.all([apiRequest('/reports/inventory-summary'),apiRequest('/reports/category-breakdown')]);summary=results[0];categories=results[1];render();}catch{body.innerHTML=empty('Reports could not be loaded.');}};await load();
 }
 
-export async function renderModule(name:PageName,root:HTMLElement){if(name==='Inventory')return inventoryPaged(root);if(name==='Stock Tracking')return transactionsPaged(root);if(name==='Categories')return categoriesStyled(root);if(name==='Locations')return locationsStyled(root);if(name==='Reports')return reportsPaged(root);return settings(root);}
+async function plansPaged(root: HTMLElement) {
+  let activeWarehouseId = Number(localStorage.getItem('stockhub.plans.warehouseId')) || Number(localStorage.getItem('stockhub.activeWarehouseId')) || 1;
+  let currentDate = new Date();
+  let objectiveFilter = 'ALL';
+  let logFilter = 'ALL';
+  let summary: any = null;
+  let objectives: any[] = [];
+  let floorLogs: any[] = [];
+  let warehouses: any[] = [];
+  let storageLocations: any[] = [];
+
+  function getWeekDetails(targetDate: Date) {
+    const d = new Date(Date.UTC(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNumber = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    const year = d.getUTCFullYear();
+
+    const monday = new Date(targetDate);
+    const currentDay = monday.getDay() || 7;
+    monday.setDate(monday.getDate() - currentDay + 1);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const fmt = (dt: Date) => dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return {
+      year,
+      weekNumber,
+      monday,
+      sunday,
+      rangeLabel: `${fmt(monday)} – ${fmt(sunday)}, ${year}`
+    };
+  }
+
+  function getActiveWarehouseName(): string {
+    const found = warehouses.find(w => w.id === activeWarehouseId);
+    return found ? found.name : 'Active Warehouse';
+  }
+
+  const render = () => {
+    const weekInfo = getWeekDetails(currentDate);
+    const whName = getActiveWarehouseName();
+
+    const filteredObjectives = objectives.filter(o => {
+      if (objectiveFilter === 'ALL') return true;
+      return o.status === objectiveFilter;
+    });
+
+    const filteredLogs = floorLogs.filter(l => {
+      if (logFilter === 'ALL') return true;
+      return l.logType === logFilter;
+    });
+
+    const pendingCount = objectives.filter(o => o.status === 'PENDING').length;
+    const inProgCount = objectives.filter(o => o.status === 'IN_PROGRESS').length;
+    const compCount = objectives.filter(o => o.status === 'COMPLETED').length;
+
+    root.innerHTML = `
+      <section class="module-view plans-view">
+        <div class="plans-topbar">
+          <div class="plans-scope-badge">
+            <div class="plans-wh-switcher" title="Select which warehouse to manage weekly plans for">
+              <label for="plansWarehouseSelect" class="plans-wh-label">
+                <span class="wh-icon">🏢</span>
+                <span class="wh-text">Warehouse:</span>
+              </label>
+              <select id="plansWarehouseSelect" class="plans-wh-select" aria-label="Select warehouse for weekly plans">
+                ${warehouses.map(w => `<option value="${w.id}" ${w.id === activeWarehouseId ? 'selected' : ''}>${esc(w.name)} (${esc(w.code)})</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="plans-week-nav">
+              <button class="week-nav-btn prev" title="Previous Week">‹ Prev Week</button>
+              <span class="week-label">Week ${weekInfo.weekNumber} · <b>${weekInfo.rangeLabel}</b></span>
+              <button class="week-nav-btn next" title="Next Week">Next Week ›</button>
+              <button class="week-nav-btn current" title="Reset to Current Week">Current Week</button>
+            </div>
+          </div>
+          <div class="plans-actions">
+            <button class="module-button primary btn-add-objective">+ New Objective</button>
+            <button class="module-button btn-add-log">+ Log Floor Note</button>
+            <button class="module-button btn-refresh-plans">↻ Refresh</button>
+          </div>
+        </div>
+
+        <div class="plan-stats-grid">
+          <article class="plan-stat-tile blue">
+            <div class="stat-content">
+              <span class="stat-category">Weekly Objectives</span>
+              <b class="stat-number">${summary?.totalObjectives ?? 0} Targets</b>
+              <p class="stat-desc">${summary?.completedObjectives ?? 0} accomplished · ${summary?.pendingObjectives ?? 0} pending</p>
+            </div>
+            <div class="stat-accent-icon">🎯</div>
+          </article>
+
+          <article class="plan-stat-tile green">
+            <div class="stat-content">
+              <span class="stat-category">Completion Rate</span>
+              <b class="stat-number">${summary?.completionRate ?? 0}%</b>
+              <p class="stat-desc">${summary?.completedObjectives ?? 0} Completed · ${summary?.inProgressObjectives ?? 0} In Progress</p>
+            </div>
+            <div class="stat-accent-icon">✓</div>
+          </article>
+
+          <article class="plan-stat-tile orange">
+            <div class="stat-content">
+              <span class="stat-category">Floor Activity Logs</span>
+              <b class="stat-number">${summary?.totalFloorLogs ?? 0} Entries</b>
+              <p class="stat-desc">Shift handovers & floor inspection notes</p>
+            </div>
+            <div class="stat-accent-icon">📋</div>
+          </article>
+
+          <article class="plan-stat-tile purple">
+            <div class="stat-content">
+              <span class="stat-category">Active Priority Focus</span>
+              <b class="stat-number">${summary?.highPriorityCount ? `${summary.highPriorityCount} Active` : 'All Clear'}</b>
+              <p class="stat-desc" title="${esc(summary?.topPriorityTitle ?? 'No critical bottlenecks pending')}">${esc(summary?.topPriorityTitle ?? 'No critical bottlenecks pending')}</p>
+            </div>
+            <div class="stat-accent-icon">⚡</div>
+          </article>
+        </div>
+
+        <div class="plan-panels-grid">
+          <section class="plan-panel objectives-panel">
+            <div class="panel-header">
+              <div class="panel-title-area">
+                <h3>Admin Objectives & Milestones</h3>
+                <p>Strategic targets, compliance checks, and operational milestones</p>
+              </div>
+              <button class="btn-panel-action btn-add-objective">+ Add</button>
+            </div>
+
+            <div class="panel-filter-tabs objective-tabs">
+              <button class="tab-btn ${objectiveFilter === 'ALL' ? 'active' : ''}" data-tab="ALL">All (${objectives.length})</button>
+              <button class="tab-btn ${objectiveFilter === 'PENDING' ? 'active' : ''}" data-tab="PENDING">Pending (${pendingCount})</button>
+              <button class="tab-btn ${objectiveFilter === 'IN_PROGRESS' ? 'active' : ''}" data-tab="IN_PROGRESS">In Progress (${inProgCount})</button>
+              <button class="tab-btn ${objectiveFilter === 'COMPLETED' ? 'active' : ''}" data-tab="COMPLETED">Completed (${compCount})</button>
+            </div>
+
+            <div class="objectives-list">
+              ${filteredObjectives.length ? filteredObjectives.map(obj => {
+                const isDone = obj.status === 'COMPLETED';
+                const isInProg = obj.status === 'IN_PROGRESS';
+                const prioTone = obj.priority === 'CRITICAL' ? 'critical' : obj.priority === 'HIGH' ? 'high' : obj.priority === 'LOW' ? 'low' : 'normal';
+                const statusLabel = isDone ? 'Completed' : isInProg ? 'In Progress' : 'Pending';
+                const statusClass = isDone ? 'done' : isInProg ? 'prog' : 'pend';
+                return `
+                  <article class="objective-card ${isDone ? 'is-completed' : ''}" data-id="${obj.id}">
+                    <button class="obj-check-btn ${statusClass}" data-id="${obj.id}" data-current="${obj.status}" title="Click to cycle status (Pending → In Progress → Completed)">
+                      ${isDone ? '✓' : isInProg ? '◐' : '○'}
+                    </button>
+                    <div class="obj-details">
+                      <div class="obj-headline">
+                        <h4 class="obj-title ${isDone ? 'struck' : ''}">${esc(obj.title)}</h4>
+                        <span class="badge-priority ${prioTone}">${esc(obj.priority)}</span>
+                        <span class="badge-category">${esc(obj.category)}</span>
+                      </div>
+                      ${obj.description ? `<p class="obj-desc">${esc(obj.description)}</p>` : ''}
+                      <div class="obj-meta">
+                        ${obj.targetDate ? `<span class="meta-date">📅 Target: <b>${esc(obj.targetDate)}</b></span>` : ''}
+                        <span class="meta-author">By ${esc(obj.creatorName)}</span>
+                        <button class="status-pill-toggle ${statusClass}" data-id="${obj.id}" data-current="${obj.status}">● ${statusLabel}</button>
+                      </div>
+                    </div>
+                    <div class="obj-actions">
+                      <button class="btn-obj-action edit" data-id="${obj.id}" title="Edit objective">✎</button>
+                      <button class="btn-obj-action delete" data-id="${obj.id}" title="Delete objective">🗑</button>
+                    </div>
+                  </article>
+                `;
+              }).join('') : `
+                <div class="panel-empty">
+                  <div class="empty-icon">🎯</div>
+                  <h4>No Objectives in this View</h4>
+                  <p>Create tactical milestones for this week to track team execution.</p>
+                  <button class="module-button primary btn-add-objective" style="margin-top:12px;">+ Add Objective</button>
+                </div>
+              `}
+            </div>
+          </section>
+
+          <section class="plan-panel logs-panel">
+            <div class="panel-header">
+              <div class="panel-title-area">
+                <h3>Floor User Logs & Shift Notes</h3>
+                <p>Shift handovers, equipment notes, and dock observations</p>
+              </div>
+              <button class="btn-panel-action btn-add-log">+ Log Note</button>
+            </div>
+
+            <div class="panel-filter-tabs log-tabs">
+              <button class="tab-btn ${logFilter === 'ALL' ? 'active' : ''}" data-tab="ALL">All (${floorLogs.length})</button>
+              <button class="tab-btn ${logFilter === 'HANDOVER' ? 'active' : ''}" data-tab="HANDOVER">Handovers</button>
+              <button class="tab-btn ${logFilter === 'RECEIVING' ? 'active' : ''}" data-tab="RECEIVING">Receiving</button>
+              <button class="tab-btn ${logFilter === 'DISCREPANCY' ? 'active' : ''}" data-tab="DISCREPANCY">Discrepancies</button>
+              <button class="tab-btn ${logFilter === 'NOTE' ? 'active' : ''}" data-tab="NOTE">Notes</button>
+            </div>
+
+            <div class="floor-logs-feed">
+              ${filteredLogs.length ? filteredLogs.map(log => {
+                const initials = (log.authorName || 'User').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+                const sevTone = log.severity === 'CRITICAL' ? 'critical' : log.severity === 'WARNING' ? 'warning' : log.severity === 'RESOLVED' ? 'resolved' : 'info';
+                const createdDate = new Date(log.createdAt);
+                const timeStr = createdDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                const dateStr = createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return `
+                  <article class="floor-log-card" data-id="${log.id}">
+                    <div class="log-avatar">${esc(initials)}</div>
+                    <div class="log-main">
+                      <div class="log-header-row">
+                        <div class="log-author-info">
+                          <b>${esc(log.authorName)}</b>
+                          <span class="badge-role">${esc(log.authorRole || 'Staff')}</span>
+                          <span class="log-time">${dateStr} at ${timeStr}</span>
+                        </div>
+                        <div class="log-badges">
+                          <span class="badge-severity ${sevTone}">● ${esc(log.severity)}</span>
+                          <span class="badge-logtype">${esc(log.logType)}</span>
+                          <button class="btn-delete-log" data-id="${log.id}" title="Delete entry">×</button>
+                        </div>
+                      </div>
+                      ${log.locationName ? `<div class="log-location-chip">📍 <b>${esc(log.locationName)}</b> (${esc(log.locationCode)})</div>` : ''}
+                      <div class="log-content-text">${esc(log.content)}</div>
+                    </div>
+                  </article>
+                `;
+              }).join('') : `
+                <div class="panel-empty">
+                  <div class="empty-icon">📝</div>
+                  <h4>No Shift Logs Recorded</h4>
+                  <p>Floor operators can record shift handover notes and dock alerts here.</p>
+                  <button class="module-button primary btn-add-log" style="margin-top:12px;">+ Log Floor Note</button>
+                </div>
+              `}
+            </div>
+          </section>
+        </div>
+      </section>
+    `;
+
+    bindEvents();
+  };
+
+  const bindEvents = () => {
+    root.querySelector<HTMLButtonElement>('.week-nav-btn.prev')?.addEventListener('click', () => {
+      currentDate.setDate(currentDate.getDate() - 7);
+      void load();
+    });
+    root.querySelector<HTMLButtonElement>('.week-nav-btn.next')?.addEventListener('click', () => {
+      currentDate.setDate(currentDate.getDate() + 7);
+      void load();
+    });
+    root.querySelector<HTMLButtonElement>('.week-nav-btn.current')?.addEventListener('click', () => {
+      currentDate = new Date();
+      void load();
+    });
+    root.querySelector<HTMLButtonElement>('.btn-refresh-plans')?.addEventListener('click', () => void load());
+
+    root.querySelectorAll<HTMLButtonElement>('.objective-tabs .tab-btn').forEach(btn => {
+      btn.onclick = () => {
+        objectiveFilter = btn.dataset.tab!;
+        render();
+      };
+    });
+
+    root.querySelectorAll<HTMLButtonElement>('.log-tabs .tab-btn').forEach(btn => {
+      btn.onclick = () => {
+        logFilter = btn.dataset.tab!;
+        render();
+      };
+    });
+
+    root.querySelectorAll<HTMLButtonElement>('.obj-check-btn, .status-pill-toggle').forEach(btn => {
+      btn.onclick = async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        const current = btn.dataset.current;
+        const nextStatus = current === 'PENDING' ? 'IN_PROGRESS' : current === 'IN_PROGRESS' ? 'COMPLETED' : 'PENDING';
+        try {
+          await apiRequest(`/plans/objectives/${id}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: nextStatus })
+          });
+          void load();
+        } catch (err) {
+          showError(err instanceof Error ? err.message : 'Could not update objective status.');
+        }
+      };
+    });
+
+    root.querySelectorAll<HTMLButtonElement>('.btn-add-objective').forEach(btn => {
+      btn.onclick = async () => {
+        const weekInfo = getWeekDetails(currentDate);
+        const defaultDate = weekInfo.monday.toISOString().slice(0, 10);
+        const res = await showFormDialog('Create Operational Objective', [
+          { name: 'title', label: 'Objective Title', required: true, placeholder: 'e.g. Inbound shipment pallet scan & audit' },
+          {
+            name: 'category', label: 'Category', type: 'select', options: [
+              { label: 'General Operations', value: 'GENERAL' },
+              { label: 'Audit / Cycle Count', value: 'AUDIT' },
+              { label: 'Inbound Receiving', value: 'RECEIVING' },
+              { label: 'Outbound Dispatch', value: 'DISPATCH' },
+              { label: 'Restocking & Replenishment', value: 'RESTOCKING' },
+              { label: 'Facility & Safety Maintenance', value: 'MAINTENANCE' },
+              { label: 'Safety & Compliance Sweep', value: 'SAFETY' }
+            ]
+          },
+          {
+            name: 'priority', label: 'Priority Level', type: 'select', options: [
+              { label: 'Normal Priority', value: 'NORMAL' },
+              { label: 'High Priority', value: 'HIGH' },
+              { label: 'Critical / Urgent', value: 'CRITICAL' },
+              { label: 'Low / Routine', value: 'LOW' }
+            ]
+          },
+          { name: 'targetDate', label: 'Target Completion Date', type: 'date', value: defaultDate },
+          { name: 'description', label: 'Details / Instructions', type: 'textarea', placeholder: 'Specify instructions, responsible team, or validation checklist...' }
+        ], 'Create Objective');
+
+        if (res) {
+          try {
+            await apiRequest('/plans/objectives', {
+              method: 'POST',
+              body: JSON.stringify({
+                warehouseId: activeWarehouseId,
+                year: weekInfo.year,
+                weekNumber: weekInfo.weekNumber,
+                title: res.title,
+                category: res.category,
+                priority: res.priority,
+                targetDate: res.targetDate || undefined,
+                description: res.description || undefined
+              })
+            });
+            void load();
+          } catch (err) {
+            showError(err instanceof Error ? err.message : 'Could not create objective.');
+          }
+        }
+      };
+    });
+
+    root.querySelectorAll<HTMLButtonElement>('.btn-obj-action.edit').forEach(btn => {
+      btn.onclick = async () => {
+        const id = Number(btn.dataset.id);
+        const obj = objectives.find(o => o.id === id);
+        if (!obj) return;
+        const res = await showFormDialog('Edit Operational Objective', [
+          { name: 'title', label: 'Objective Title', value: obj.title, required: true },
+          {
+            name: 'category', label: 'Category', type: 'select', value: obj.category, options: [
+              { label: 'General Operations', value: 'GENERAL' },
+              { label: 'Audit / Cycle Count', value: 'AUDIT' },
+              { label: 'Inbound Receiving', value: 'RECEIVING' },
+              { label: 'Outbound Dispatch', value: 'DISPATCH' },
+              { label: 'Restocking & Replenishment', value: 'RESTOCKING' },
+              { label: 'Facility & Safety Maintenance', value: 'MAINTENANCE' },
+              { label: 'Safety & Compliance Sweep', value: 'SAFETY' }
+            ]
+          },
+          {
+            name: 'priority', label: 'Priority Level', type: 'select', value: obj.priority, options: [
+              { label: 'Normal Priority', value: 'NORMAL' },
+              { label: 'High Priority', value: 'HIGH' },
+              { label: 'Critical / Urgent', value: 'CRITICAL' },
+              { label: 'Low / Routine', value: 'LOW' }
+            ]
+          },
+          {
+            name: 'status', label: 'Status', type: 'select', value: obj.status, options: [
+              { label: 'Pending', value: 'PENDING' },
+              { label: 'In Progress', value: 'IN_PROGRESS' },
+              { label: 'Completed', value: 'COMPLETED' }
+            ]
+          },
+          { name: 'targetDate', label: 'Target Completion Date', type: 'date', value: obj.targetDate ?? '' },
+          { name: 'description', label: 'Details / Instructions', type: 'textarea', value: obj.description ?? '' }
+        ], 'Save Changes');
+
+        if (res) {
+          try {
+            await apiRequest(`/plans/objectives/${id}`, {
+              method: 'PUT',
+              body: JSON.stringify(res)
+            });
+            void load();
+          } catch (err) {
+            showError(err instanceof Error ? err.message : 'Could not update objective.');
+          }
+        }
+      };
+    });
+
+    root.querySelectorAll<HTMLButtonElement>('.btn-obj-action.delete').forEach(btn => {
+      btn.onclick = async () => {
+        const id = Number(btn.dataset.id);
+        const confirmed = await confirmAction('Delete Objective', 'Are you sure you want to permanently delete this operational objective?');
+        if (confirmed) {
+          try {
+            await apiRequest(`/plans/objectives/${id}`, { method: 'DELETE' });
+            void load();
+          } catch (err) {
+            showError(err instanceof Error ? err.message : 'Could not delete objective.');
+          }
+        }
+      };
+    });
+
+    const whSelect = root.querySelector<HTMLSelectElement>('#plansWarehouseSelect');
+    if (whSelect) {
+      whSelect.onchange = (e) => {
+        const nextId = Number((e.target as HTMLSelectElement).value);
+        activeWarehouseId = nextId;
+        localStorage.setItem('stockhub.plans.warehouseId', String(nextId));
+        void load();
+      };
+    }
+
+    root.querySelectorAll<HTMLButtonElement>('.btn-add-log').forEach(btn => {
+      btn.onclick = async () => {
+        const whLocationIds = new Set<number>([activeWarehouseId]);
+        storageLocations.filter(loc => loc.parentLocationId === activeWarehouseId).forEach(loc => whLocationIds.add(loc.id));
+        storageLocations.filter(loc => whLocationIds.has(loc.parentLocationId)).forEach(loc => whLocationIds.add(loc.id));
+        const whSlots = storageLocations.filter(loc => whLocationIds.has(loc.id) && loc.id !== activeWarehouseId);
+
+        const locOptions = [
+          { label: '— Warehouse General (No Specific Location) —', value: '' },
+          ...whSlots.map(l => ({ label: `${l.name} (${l.code})`, value: String(l.id) }))
+        ];
+
+        const res = await showFormDialog('Log Shift & Floor Note', [
+          {
+            name: 'logType', label: 'Entry Type', type: 'select', options: [
+              { label: 'Shift Handover & Transition', value: 'HANDOVER' },
+              { label: 'Inbound Receiving & Unloading', value: 'RECEIVING' },
+              { label: 'Discrepancy / Damage Alert', value: 'DISCREPANCY' },
+              { label: 'Bin & Rack Inspection', value: 'INSPECTION' },
+              { label: 'General Note', value: 'NOTE' }
+            ]
+          },
+          {
+            name: 'severity', label: 'Severity / Urgency', type: 'select', options: [
+              { label: 'Informational (Routine)', value: 'INFO' },
+              { label: 'Warning (Requires Attention)', value: 'WARNING' },
+              { label: 'Critical Alert (Immediate Action)', value: 'CRITICAL' },
+              { label: 'Resolved / Verified', value: 'RESOLVED' }
+            ]
+          },
+          { name: 'locationId', label: 'Tagged Storage Location (Optional)', type: 'select', options: locOptions },
+          { name: 'content', label: 'Log Content / Observations', type: 'textarea', required: true, placeholder: 'Record shift notes, equipment status, stock discrepancy, or dock observations...' }
+        ], 'Record Floor Note');
+
+        if (res) {
+          try {
+            await apiRequest('/plans/logs', {
+              method: 'POST',
+              body: JSON.stringify({
+                warehouseId: activeWarehouseId,
+                locationId: res.locationId ? Number(res.locationId) : undefined,
+                logType: res.logType,
+                severity: res.severity,
+                content: res.content
+              })
+            });
+            void load();
+          } catch (err) {
+            showError(err instanceof Error ? err.message : 'Could not save floor note.');
+          }
+        }
+      };
+    });
+
+    root.querySelectorAll<HTMLButtonElement>('.btn-delete-log').forEach(btn => {
+      btn.onclick = async () => {
+        const id = Number(btn.dataset.id);
+        const confirmed = await confirmAction('Delete Floor Note', 'Are you sure you want to remove this floor log entry?');
+        if (confirmed) {
+          try {
+            await apiRequest(`/plans/logs/${id}`, { method: 'DELETE' });
+            void load();
+          } catch (err) {
+            showError(err instanceof Error ? err.message : 'Could not delete floor note.');
+          }
+        }
+      };
+    });
+  };
+
+  const load = async () => {
+    const stored = localStorage.getItem('stockhub.plans.warehouseId');
+    if (stored) {
+      activeWarehouseId = Number(stored);
+    }
+    const weekInfo = getWeekDetails(currentDate);
+    try {
+      const [sumRes, objRes, logRes, allLocs]: any[] = await Promise.all([
+        apiRequest(`/plans/summary?warehouseId=${activeWarehouseId}&year=${weekInfo.year}&weekNumber=${weekInfo.weekNumber}`),
+        apiRequest(`/plans/objectives?warehouseId=${activeWarehouseId}&year=${weekInfo.year}&weekNumber=${weekInfo.weekNumber}`),
+        apiRequest(`/plans/logs?warehouseId=${activeWarehouseId}&limit=50`),
+        apiRequest('/locations')
+      ]);
+      storageLocations = Array.isArray(allLocs) ? allLocs : [];
+      warehouses = storageLocations.filter((l: any) => l.locationType === 'WAREHOUSE');
+      if (warehouses.length > 0 && !warehouses.some(w => w.id === activeWarehouseId)) {
+        activeWarehouseId = warehouses[0].id;
+        localStorage.setItem('stockhub.plans.warehouseId', String(activeWarehouseId));
+      }
+      summary = sumRes;
+      objectives = Array.isArray(objRes) ? objRes : [];
+      floorLogs = Array.isArray(logRes) ? logRes : [];
+      render();
+    } catch (err) {
+      root.innerHTML = `<div class="module-view plans-view"><div class="module-empty"><strong>Could not load Plans & Weekly Notes</strong><span>${esc(err instanceof Error ? err.message : 'Please check your connection and retry.')}</span><button class="module-button primary btn-retry" style="margin-top:12px;">Retry</button></div></div>`;
+      root.querySelector<HTMLButtonElement>('.btn-retry')?.addEventListener('click', () => void load());
+    }
+  };
+
+  await load();
+}
+
+export async function renderModule(name:PageName,root:HTMLElement){if(name==='Inventory')return inventoryPaged(root);if(name==='Stock Tracking')return transactionsPaged(root);if(name==='Categories')return categoriesStyled(root);if(name==='Locations')return locationsStyled(root);if(name==='Plans')return plansPaged(root);if(name==='Reports')return reportsPaged(root);return settings(root);}

@@ -5,7 +5,7 @@ import { ensureSession, renderModule, showLogin } from './pages/modules';
 import { apiRequest } from './services/api';
 import { isDialogOpen, showError } from './ui/dialog';
 
-type IconName = 'grid' | 'box' | 'activity' | 'tag' | 'pin' | 'chart' | 'settings' | 'search' | 'moon' | 'bell' | 'plus' | 'chevron' | 'wallet' | 'warning' | 'clock' | 'filter' | 'download' | 'more' | 'edit' | 'move' | 'arrow' | 'menu' | 'close' | 'logout';
+type IconName = 'grid' | 'box' | 'activity' | 'tag' | 'pin' | 'chart' | 'settings' | 'search' | 'moon' | 'bell' | 'plus' | 'chevron' | 'wallet' | 'warning' | 'clock' | 'filter' | 'download' | 'more' | 'edit' | 'move' | 'arrow' | 'menu' | 'close' | 'logout' | 'clipboard';
 
 const icons: Record<IconName, string> = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -31,7 +31,8 @@ const icons: Record<IconName, string> = {
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
-  logout: '<path d="M10 17l5-5-5-5M15 12H3M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/>'
+  logout: '<path d="M10 17l5-5-5-5M15 12H3M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/>',
+  clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M9 12h6M9 16h6"/>'
 };
 
 const icon = (name: IconName, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`;
@@ -42,7 +43,8 @@ let latestNotificationId=0;
 
 const navItems: [IconName, string][] = [
   ['grid', 'Dashboard'], ['box', 'Inventory'], ['activity', 'Stock Tracking'],
-  ['tag', 'Categories'], ['pin', 'Locations'], ['chart', 'Reports'], ['settings', 'Settings']
+  ['tag', 'Categories'], ['pin', 'Locations'], ['clipboard', 'Plans'],
+  ['chart', 'Reports'], ['settings', 'Settings']
 ];
 
 type LocationItem = { name: string; code: string; units: number; status: string };
@@ -53,39 +55,45 @@ type WarehouseLocation = {
   items: LocationItem[];
 };
 
-// Mirrors the warehouse portion of the future GET /api/dashboard response.
-// Percentages are intentionally derived below rather than stored in the UI.
-const warehouseData: { name: string; locations: WarehouseLocation[] } = {
-  name: 'Main Warehouse',
-  locations: [
-    { id: 1, code: 'A', name: 'Shelf A', currentUsage: 0, maximumCapacity: 500, skuCount: 0, lowStockCount: 0, outOfStockCount: 0,
-      sublocations: [{ code: 'A1', currentUsage: 0, maximumCapacity: 165 }, { code: 'A2', currentUsage: 0, maximumCapacity: 165 }, { code: 'A3', currentUsage: 0, maximumCapacity: 170 }], items: [] },
-    { id: 2, code: 'B', name: 'Shelf B', currentUsage: 0, maximumCapacity: 500, skuCount: 0, lowStockCount: 0, outOfStockCount: 0,
-      sublocations: [{ code: 'B1', currentUsage: 0, maximumCapacity: 165 }, { code: 'B2', currentUsage: 0, maximumCapacity: 165 }, { code: 'B3', currentUsage: 0, maximumCapacity: 170 }], items: [] },
-    { id: 3, code: 'C', name: 'Shelf C', currentUsage: 0, maximumCapacity: 500, skuCount: 0, lowStockCount: 0, outOfStockCount: 0,
-      sublocations: [{ code: 'C1', currentUsage: 0, maximumCapacity: 165 }, { code: 'C2', currentUsage: 0, maximumCapacity: 165 }, { code: 'C3', currentUsage: 0, maximumCapacity: 170 }], items: [] },
-    { id: 4, code: 'ST', name: 'Storage Area', currentUsage: 0, maximumCapacity: 500, skuCount: 0, lowStockCount: 0, outOfStockCount: 0,
-      sublocations: [{ code: 'ST-01', currentUsage: 0, maximumCapacity: 170 }, { code: 'ST-02', currentUsage: 0, maximumCapacity: 165 }, { code: 'ST-03', currentUsage: 0, maximumCapacity: 165 }], items: [] }
-  ]
+const esc = (value: string | number | null | undefined) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+
+let activeWarehouseId: number = Number(localStorage.getItem('stockhub.activeWarehouseId')) || 1;
+
+const getPinnedSlotKey = (whId?: number) => `stockhub.pinnedSlots.${whId || activeWarehouseId || 1}`;
+
+const getStoredPinnedSlotIds = (whId?: number): number[] | undefined => {
+  const stored = localStorage.getItem(getPinnedSlotKey(whId));
+  if (!stored) return undefined;
+  try {
+    const parsed = JSON.parse(stored);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(Number).filter(n => Number.isInteger(n) && n > 0);
+  } catch {}
+  return undefined;
 };
 
-const utilization = (current: number, maximum: number) => Math.min(100, Math.round((current / maximum) * 100));
-const capacityTone = (percent: number) => percent >= 95 ? 'critical' : percent >= 85 ? 'high' : percent >= 70 ? 'full' : 'healthy';
-const totalCurrent = warehouseData.locations.reduce((sum, location) => sum + location.currentUsage, 0);
-const totalCapacity = warehouseData.locations.reduce((sum, location) => sum + location.maximumCapacity, 0);
-const overallUtilization = utilization(totalCurrent, totalCapacity);
+const setStoredPinnedSlotIds = (whId: number | undefined, ids: number[] | undefined) => {
+  const key = getPinnedSlotKey(whId);
+  if (!ids || ids.length === 0) {
+    localStorage.removeItem(key);
+  } else {
+    localStorage.setItem(key, JSON.stringify(ids.slice(0, 6)));
+  }
+};
 
-const shelf = (label: string, x: number, boxes: number[]) => `
+
+const utilization = (current: number, maximum: number) => Math.min(100, Math.round((Number(current || 0) / (Number(maximum) || 1)) * 100));
+const capacityTone = (percent: number) => percent >= 95 ? 'critical' : percent >= 85 ? 'high' : percent >= 70 ? 'full' : 'healthy';
+
+const shelfBay = (x: number, boxes: number[]) => `
   <g transform="translate(${x} 0)">
     <rect x="0" y="78" width="154" height="133" rx="5" fill="#dbe5ef" fill-opacity=".56" stroke="#1665cc" stroke-width="1.6" stroke-dasharray="5 4"/>
     <rect x="14" y="88" width="7" height="118" rx="2" fill="#587997"/><rect x="132" y="88" width="7" height="118" rx="2" fill="#587997"/>
     <path d="M15 123h123M15 163h123M15 202h123" stroke="#587997" stroke-width="5"/>
     ${boxes.map((v, i) => `<rect x="${27 + (i % 3) * 34}" y="${92 + Math.floor(i / 3) * 39}" width="26" height="24" rx="2" fill="${v ? '#b88958' : '#d4a56d'}"/><path d="M${40 + (i % 3) * 34} ${92 + Math.floor(i / 3) * 39}v24" stroke="#8b633c" opacity=".45"/>`).join('')}
-    <rect x="48" y="60" width="60" height="28" rx="6" fill="#0e5bb8"/><text x="78" y="78" text-anchor="middle" fill="white" font-size="13" font-weight="700">${label}</text>
   </g>`;
 
 const warehouseSvg = `
-<svg class="warehouse-art" viewBox="0 0 850 300" role="img" aria-label="Interactive warehouse overview with shelves A, B, C and storage area">
+<svg class="warehouse-art" viewBox="0 0 850 300" preserveAspectRatio="none" role="img" aria-label="Interactive warehouse overview and storage bays">
   <defs>
     <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#edf3f8"/><stop offset="1" stop-color="#ccd9e6"/></linearGradient>
     <linearGradient id="floor" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef3f7"/><stop offset="1" stop-color="#b9c8d6"/></linearGradient>
@@ -96,28 +104,449 @@ const warehouseSvg = `
   <g stroke="#8fa6ba" stroke-width="4" opacity=".55"><path d="M0 58 425 0l425 58M70 50l120 42L310 16l115 76L540 16l120 76 120-42M0 74h850"/></g>
   <g stroke="#b4c4d2" opacity=".6"><path d="M40 70v155M100 60v165M160 52v173M220 43v182M280 35v190M340 26v199M400 18v207M460 18v207M520 28v197M580 36v189M640 44v181M700 52v173M760 60v165M820 68v157"/></g>
   <path d="M0 214h850v86H0Z" fill="url(#floor)"/><path d="m425 210-55 90M425 210l55 90" stroke="#ffd253" stroke-width="5" opacity=".85"/>
-  ${shelf('Shelf A', 28, [1,0,1,0,1,1,1,0,1])}
-  ${shelf('Shelf B', 232, [0,1,1,1,0,1,1,1,0])}
-  ${shelf('Shelf C', 438, [1,1,0,1,1,1,0,1,1])}
-  <g transform="translate(650 0)">${shelf('Storage Area', 0, [1,0,1,1,1,0,0,1,1]).replace('<g transform="translate(0 0)">','').replace('</g>','')}</g>
+  ${shelfBay(28, [1,0,1,0,1,1,1,0,1])}
+  ${shelfBay(232, [0,1,1,1,0,1,1,1,0])}
+  ${shelfBay(438, [1,1,0,1,1,1,0,1,1])}
+  ${shelfBay(650, [1,0,1,1,1,0,0,1,1])}
   <g transform="translate(752 226)"><rect x="0" y="20" width="67" height="31" rx="5" fill="#dc8b24"/><rect x="45" y="5" width="29" height="27" rx="4" fill="#486b82"/><circle cx="16" cy="53" r="9" fill="#324657"/><circle cx="62" cy="53" r="9" fill="#324657"/><path d="M72 8V-10h4V8" stroke="#3a5367" stroke-width="4"/></g>
 </svg>`;
 
+const eastHubSvg = `
+<svg class="warehouse-art warehouse-art-easthub" viewBox="0 0 850 300" preserveAspectRatio="none" role="img" aria-label="East Hub Warehouse high-bay distribution aisles and shipping docks">
+  <defs>
+    <linearGradient id="ehCeiling" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a394f"/>
+      <stop offset="65%" stop-color="#41546e"/>
+      <stop offset="100%" stop-color="#556b87"/>
+    </linearGradient>
+    <linearGradient id="ehBackWall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#72849c"/>
+      <stop offset="100%" stop-color="#93a4b9"/>
+    </linearGradient>
+    <linearGradient id="ehFloor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#9caebb"/>
+      <stop offset="35%" stop-color="#6e8498"/>
+      <stop offset="70%" stop-color="#4e6479"/>
+      <stop offset="100%" stop-color="#3b4d61"/>
+    </linearGradient>
+    <linearGradient id="ehSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#80c8f8"/>
+      <stop offset="100%" stop-color="#cbe8fc"/>
+    </linearGradient>
+    <linearGradient id="ehBeamRed" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="25%" stop-color="#dc2626"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
+    <linearGradient id="ehUprightBlue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="40%" stop-color="#1d4ed8"/>
+      <stop offset="100%" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <linearGradient id="ehBoxWarm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="40%" stop-color="#fba863"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="ehBoxTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffedd5"/>
+      <stop offset="100%" stop-color="#fed7aa"/>
+    </linearGradient>
+    <linearGradient id="ehBoxSide" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#c26e10"/>
+      <stop offset="100%" stop-color="#92400e"/>
+    </linearGradient>
+    <linearGradient id="ehLightRay" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.32"/>
+      <stop offset="70%" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ehFloorSheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="65%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="ehGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="850" height="152" fill="url(#ehCeiling)"/>
+  <g stroke="#37485f" stroke-width="1.8" opacity="0.65">
+    <line x1="0" y1="0" x2="425" y2="135"/>
+    <line x1="140" y1="0" x2="425" y2="135"/>
+    <line x1="280" y1="0" x2="425" y2="135"/>
+    <line x1="570" y1="0" x2="425" y2="135"/>
+    <line x1="710" y1="0" x2="425" y2="135"/>
+    <line x1="850" y1="0" x2="425" y2="135"/>
+    <line x1="100" y1="32" x2="750" y2="32"/>
+    <line x1="220" y1="72" x2="630" y2="72"/>
+    <line x1="320" y1="106" x2="530" y2="106"/>
+  </g>
+
+  <polygon points="170,22 135,190 280,190 240,22" fill="url(#ehLightRay)"/>
+  <polygon points="380,20 330,190 520,190 470,20" fill="url(#ehLightRay)"/>
+  <polygon points="610,22 570,190 715,190 680,22" fill="url(#ehLightRay)"/>
+
+  <g filter="url(#ehGlow)">
+    <rect x="155" y="19" width="90" height="6" rx="2" fill="#ffffff"/>
+    <rect x="375" y="17" width="100" height="6.5" rx="2" fill="#ffffff"/>
+    <rect x="605" y="19" width="90" height="6" rx="2" fill="#ffffff"/>
+    <rect x="270" y="68" width="55" height="4.5" rx="1.5" fill="#f0f9ff" opacity="0.9"/>
+    <rect x="525" y="68" width="55" height="4.5" rx="1.5" fill="#f0f9ff" opacity="0.9"/>
+  </g>
+
+  <rect x="310" y="106" width="230" height="84" fill="url(#ehBackWall)"/>
+  <g stroke="#61748d" stroke-width="1" opacity="0.55">
+    <line x1="310" y1="106" x2="310" y2="190"/>
+    <line x1="345" y1="106" x2="345" y2="190"/>
+    <line x1="505" y1="106" x2="505" y2="190"/>
+    <line x1="540" y1="106" x2="540" y2="190"/>
+  </g>
+
+  <rect x="344" y="117" width="162" height="73" rx="2" fill="#1e293b"/>
+  <g>
+    <rect x="344" y="117" width="162" height="7" fill="#f59e0b"/>
+    <path d="M348 117l7 7h5l-7-7z M366 117l7 7h5l-7-7z M384 117l7 7h5l-7-7z M402 117l7 7h5l-7-7z M420 117l7 7h5l-7-7z M438 117l7 7h5l-7-7z M456 117l7 7h5l-7-7z M474 117l7 7h5l-7-7z M492 117l7 7h5l-7-7z" fill="#1e293b"/>
+    <rect x="344" y="124" width="4" height="66" fill="#475569"/>
+    <rect x="502" y="124" width="4" height="66" fill="#475569"/>
+  </g>
+
+  <g>
+    <rect x="348" y="124" width="154" height="66" fill="url(#ehSky)"/>
+    <path d="M348 162h154v28H348z" fill="#93c5fd" opacity="0.6"/>
+    <path d="M352 162v-16h8v16 M364 162v-21h12v21 M380 162v-10h14v10 M448 162v-24h10v24 M462 162v-14h16v14 M482 162v-18h8v18" fill="#60a5fa" opacity="0.75"/>
+    <path d="M430 136h28l-8 26h-4l6-22h-18l-4 22h-3z" fill="#3b82f6" opacity="0.6"/>
+
+    <rect x="354" y="166" width="34" height="15" rx="0.5" fill="#0284c7"/>
+    <line x1="362" y1="166" x2="362" y2="181" stroke="#0369a1" stroke-width="0.8"/>
+    <line x1="371" y1="166" x2="371" y2="181" stroke="#0369a1" stroke-width="0.8"/>
+    <line x1="380" y1="166" x2="380" y2="181" stroke="#0369a1" stroke-width="0.8"/>
+    <rect x="356" y="152" width="30" height="14" rx="0.5" fill="#ea580c"/>
+    <line x1="366" y1="152" x2="366" y2="166" stroke="#c2410c" stroke-width="0.8"/>
+    <line x1="376" y1="152" x2="376" y2="166" stroke="#c2410c" stroke-width="0.8"/>
+    <rect x="394" y="161" width="38" height="20" rx="0.5" fill="#0f766e"/>
+    <line x1="403" y1="161" x2="403" y2="181" stroke="#115e59" stroke-width="0.8"/>
+    <line x1="413" y1="161" x2="413" y2="181" stroke="#115e59" stroke-width="0.8"/>
+    <line x1="423" y1="161" x2="423" y2="181" stroke="#115e59" stroke-width="0.8"/>
+    <rect x="444" y="168" width="34" height="14" rx="0.5" fill="#d97706"/>
+    <line x1="455" y1="168" x2="455" y2="182" stroke="#b45309" stroke-width="0.8"/>
+    <line x1="467" y1="168" x2="467" y2="182" stroke="#b45309" stroke-width="0.8"/>
+    <rect x="348" y="181" width="154" height="9" fill="#64748b"/>
+  </g>
+
+  <polygon points="0,188 850,188 850,300 0,300" fill="url(#ehFloor)"/>
+  <polygon points="310,188 540,188 640,300 210,300" fill="url(#ehFloorSheen)"/>
+
+  <g stroke="#f59e0b" stroke-width="2.5" opacity="0.95" stroke-dasharray="8 6">
+    <line x1="358" y1="190" x2="90" y2="300"/>
+    <line x1="492" y1="190" x2="760" y2="300"/>
+  </g>
+  <line x1="425" y1="192" x2="425" y2="300" stroke="#fcd34d" stroke-width="1.2" opacity="0.45" stroke-dasharray="5 5"/>
+
+  <g id="leftRackStructure">
+    <rect x="295" y="86" width="13" height="106" rx="1" fill="url(#ehUprightBlue)"/>
+    <rect x="195" y="48" width="19" height="152" rx="1.5" fill="url(#ehUprightBlue)"/>
+    <rect x="0" y="0" width="34" height="268" rx="2" fill="url(#ehUprightBlue)"/>
+
+    <g fill="#0f172a" opacity="0.5">
+      <rect x="14" y="25" width="6" height="3" rx="1"/>
+      <rect x="14" y="45" width="6" height="3" rx="1"/>
+      <rect x="14" y="65" width="6" height="3" rx="1"/>
+      <rect x="14" y="85" width="6" height="3" rx="1"/>
+      <rect x="14" y="105" width="6" height="3" rx="1"/>
+      <rect x="14" y="125" width="6" height="3" rx="1"/>
+      <rect x="14" y="145" width="6" height="3" rx="1"/>
+      <rect x="14" y="165" width="6" height="3" rx="1"/>
+      <rect x="14" y="185" width="6" height="3" rx="1"/>
+      <rect x="14" y="205" width="6" height="3" rx="1"/>
+      <rect x="14" y="225" width="6" height="3" rx="1"/>
+      <rect x="202" y="65" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="202" y="82" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="202" y="99" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="202" y="116" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="202" y="133" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="202" y="150" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="202" y="167" width="4.5" height="2.5" rx="0.8"/>
+    </g>
+
+    <g stroke="#2563eb" stroke-width="2.5" opacity="0.6">
+      <line x1="34" y1="52" x2="195" y2="110"/>
+      <line x1="34" y1="110" x2="195" y2="52"/>
+      <line x1="34" y1="124" x2="195" y2="178"/>
+      <line x1="34" y1="178" x2="195" y2="124"/>
+      <line x1="214" y1="78" x2="295" y2="128"/>
+      <line x1="214" y1="128" x2="295" y2="78"/>
+    </g>
+
+    <polygon points="0,52 308,110 308,119 0,63" fill="url(#ehBeamRed)"/>
+    <line x1="0" y1="53" x2="308" y2="111" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
+    <polygon points="0,126 308,145 308,154 0,137" fill="url(#ehBeamRed)"/>
+    <line x1="0" y1="127" x2="308" y2="146" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
+    <polygon points="0,202 308,179 308,188 0,213" fill="url(#ehBeamRed)"/>
+    <line x1="0" y1="203" x2="308" y2="180" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
+
+    <rect x="2" y="48" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
+    <rect x="2" y="122" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
+    <rect x="2" y="198" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
+    <rect x="194" y="74" width="20" height="12" rx="1" fill="#b91c1c"/>
+    <rect x="194" y="128" width="20" height="12" rx="1" fill="#b91c1c"/>
+    <rect x="194" y="171" width="20" height="12" rx="1" fill="#b91c1c"/>
+  </g>
+
+  <g id="leftCartons">
+    <g transform="translate(36, 12)">
+      <rect x="0" y="0" width="62" height="39" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="62" height="6" fill="url(#ehBoxTop)"/>
+      <line x1="31" y1="6" x2="31" y2="39" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
+      <rect x="8" y="12" width="16" height="10" rx="1" fill="#ffffff" opacity="0.9"/>
+      <line x1="11" y1="15" x2="21" y2="15" stroke="#1e293b" stroke-width="1"/>
+      <line x1="11" y1="18" x2="19" y2="18" stroke="#1e293b" stroke-width="1"/>
+    </g>
+    <g transform="translate(104, 18)">
+      <rect x="0" y="0" width="54" height="36" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="54" height="5" fill="url(#ehBoxTop)"/>
+      <line x1="27" y1="5" x2="27" y2="36" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
+      <rect x="6" y="10" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+    <g transform="translate(220, 72)">
+      <rect x="0" y="0" width="34" height="27" rx="1.5" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="34" height="4" fill="url(#ehBoxTop)"/>
+      <rect x="38" y="4" width="32" height="23" rx="1.5" fill="url(#ehBoxWarm)"/>
+    </g>
+
+    <g transform="translate(36, 78)">
+      <rect x="0" y="0" width="70" height="47" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="70" height="7" fill="url(#ehBoxTop)"/>
+      <line x1="35" y1="7" x2="35" y2="47" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
+      <rect x="10" y="14" width="18" height="12" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+    <g transform="translate(112, 85)">
+      <rect x="0" y="0" width="46" height="42" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="46" height="6" fill="url(#ehBoxTop)"/>
+      <rect x="8" y="12" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+    <g transform="translate(220, 116)">
+      <rect x="0" y="0" width="36" height="27" rx="1.5" fill="url(#ehBoxWarm)"/>
+      <rect x="40" y="120" width="30" height="23" rx="1.5" fill="url(#ehBoxWarm)"/>
+    </g>
+
+    <g transform="translate(36, 194)">
+      <rect x="0" y="6" width="76" height="4" fill="#78350f"/>
+      <rect x="4" y="0" width="8" height="6" fill="#92400e"/>
+      <rect x="34" y="0" width="8" height="6" fill="#92400e"/>
+      <rect x="64" y="0" width="8" height="6" fill="#92400e"/>
+      <rect x="2" y="-45" width="72" height="45" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="2" y="-45" width="72" height="6" fill="url(#ehBoxTop)"/>
+      <line x1="38" y1="-39" x2="38" y2="0" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
+      <rect x="10" y="-32" width="20" height="12" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+    <g transform="translate(118, 178)">
+      <rect x="0" y="6" width="56" height="4" fill="#78350f"/>
+      <rect x="2" y="-36" width="52" height="36" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="2" y="-36" width="52" height="5" fill="url(#ehBoxTop)"/>
+    </g>
+  </g>
+
+  <g id="rightRackStructure">
+    <rect x="542" y="86" width="13" height="106" rx="1" fill="url(#ehUprightBlue)"/>
+    <rect x="636" y="48" width="19" height="152" rx="1.5" fill="url(#ehUprightBlue)"/>
+    <rect x="816" y="0" width="34" height="268" rx="2" fill="url(#ehUprightBlue)"/>
+
+    <g fill="#0f172a" opacity="0.5">
+      <rect x="830" y="25" width="6" height="3" rx="1"/>
+      <rect x="830" y="45" width="6" height="3" rx="1"/>
+      <rect x="830" y="65" width="6" height="3" rx="1"/>
+      <rect x="830" y="85" width="6" height="3" rx="1"/>
+      <rect x="830" y="105" width="6" height="3" rx="1"/>
+      <rect x="830" y="125" width="6" height="3" rx="1"/>
+      <rect x="830" y="145" width="6" height="3" rx="1"/>
+      <rect x="830" y="165" width="6" height="3" rx="1"/>
+      <rect x="830" y="185" width="6" height="3" rx="1"/>
+      <rect x="830" y="205" width="6" height="3" rx="1"/>
+      <rect x="643" y="65" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="643" y="82" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="643" y="99" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="643" y="116" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="643" y="133" width="4.5" height="2.5" rx="0.8"/>
+      <rect x="643" y="150" width="4.5" height="2.5" rx="0.8"/>
+    </g>
+
+    <g stroke="#2563eb" stroke-width="2.5" opacity="0.6">
+      <line x1="816" y1="52" x2="655" y2="110"/>
+      <line x1="816" y1="110" x2="655" y2="52"/>
+      <line x1="816" y1="124" x2="655" y2="178"/>
+      <line x1="816" y1="178" x2="655" y2="124"/>
+      <line x1="636" y1="78" x2="555" y2="128"/>
+      <line x1="636" y1="128" x2="555" y2="78"/>
+    </g>
+
+    <polygon points="542,110 850,52 850,63 542,119" fill="url(#ehBeamRed)"/>
+    <line x1="542" y1="111" x2="850" y2="53" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
+    <polygon points="542,145 850,126 850,137 542,154" fill="url(#ehBeamRed)"/>
+    <line x1="542" y1="146" x2="850" y2="127" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
+    <polygon points="542,179 850,202 850,213 542,188" fill="url(#ehBeamRed)"/>
+    <line x1="542" y1="180" x2="850" y2="203" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
+
+    <rect x="818" y="48" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
+    <rect x="818" y="122" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
+    <rect x="818" y="198" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
+    <rect x="636" y="74" width="20" height="12" rx="1" fill="#b91c1c"/>
+    <rect x="636" y="128" width="20" height="12" rx="1" fill="#b91c1c"/>
+    <rect x="636" y="171" width="20" height="12" rx="1" fill="#b91c1c"/>
+  </g>
+
+  <g id="rightCartons">
+    <g transform="translate(660, 18)">
+      <rect x="0" y="0" width="56" height="37" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="56" height="5.5" fill="url(#ehBoxTop)"/>
+      <line x1="28" y1="5.5" x2="28" y2="37" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
+      <rect x="34" y="10" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+    <g transform="translate(730, 12)">
+      <rect x="0" y="0" width="68" height="42" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="68" height="6.5" fill="url(#ehBoxTop)"/>
+      <line x1="34" y1="6.5" x2="34" y2="42" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
+      <rect x="42" y="12" width="16" height="10" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+    <g transform="translate(560, 74)">
+      <rect x="0" y="0" width="34" height="26" rx="1.5" fill="url(#ehBoxWarm)"/>
+      <rect x="38" y="2" width="32" height="24" rx="1.5" fill="url(#ehBoxWarm)"/>
+    </g>
+
+    <g transform="translate(660, 85)">
+      <rect x="0" y="0" width="46" height="43" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="46" height="6" fill="url(#ehBoxTop)"/>
+      <rect x="24" y="12" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+    <g transform="translate(720, 78)">
+      <rect x="0" y="0" width="76" height="48" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="0" y="0" width="76" height="7" fill="url(#ehBoxTop)"/>
+      <line x1="38" y1="7" x2="38" y2="48" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
+      <rect x="46" y="14" width="18" height="12" rx="1" fill="#ffffff" opacity="0.9"/>
+    </g>
+
+    <g transform="translate(660, 178)">
+      <rect x="0" y="6" width="60" height="4" fill="#78350f"/>
+      <rect x="2" y="-38" width="56" height="38" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="2" y="-38" width="56" height="5" fill="url(#ehBoxTop)"/>
+    </g>
+    <g transform="translate(730, 194)">
+      <rect x="0" y="6" width="76" height="4" fill="#78350f"/>
+      <rect x="2" y="-46" width="72" height="46" rx="2" fill="url(#ehBoxWarm)"/>
+      <rect x="2" y="-46" width="72" height="6" fill="url(#ehBoxTop)"/>
+      <line x1="38" y1="-40" x2="38" y2="0" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
+    </g>
+  </g>
+
+  <g transform="translate(460, 184)">
+    <rect x="0" y="52" width="112" height="5" rx="1" fill="#78350f"/>
+    <rect x="6" y="47" width="10" height="5" fill="#92400e"/>
+    <rect x="50" y="47" width="10" height="5" fill="#92400e"/>
+    <rect x="96" y="47" width="10" height="5" fill="#92400e"/>
+    <polygon points="0,18 90,8 112,14 20,24" fill="url(#ehBoxTop)"/>
+    <polygon points="0,18 20,24 20,48 0,42" fill="url(#ehBoxSide)"/>
+    <polygon points="20,24 112,14 112,38 20,48" fill="url(#ehBoxWarm)"/>
+    <g transform="translate(24, -14)">
+      <polygon points="0,12 68,6 84,10 16,16" fill="url(#ehBoxTop)"/>
+      <polygon points="0,12 16,16 16,34 0,30" fill="url(#ehBoxSide)"/>
+      <polygon points="16,16 84,10 84,28 16,34" fill="url(#ehBoxWarm)"/>
+      <rect x="34" y="19" width="14" height="8" rx="0.5" fill="#ffffff" opacity="0.95"/>
+      <line x1="37" y1="22" x2="45" y2="22" stroke="#0f172a" stroke-width="0.8"/>
+      <line x1="37" y1="24" x2="43" y2="24" stroke="#0f172a" stroke-width="0.8"/>
+    </g>
+  </g>
+
+  <g transform="translate(230, 206)">
+    <polygon points="0,8 48,2 60,6 12,12" fill="url(#ehBoxTop)"/>
+    <polygon points="0,8 12,12 12,32 0,28" fill="url(#ehBoxSide)"/>
+    <polygon points="12,12 60,6 60,26 12,32" fill="url(#ehBoxWarm)"/>
+    <rect x="22" y="17" width="12" height="7" rx="0.5" fill="#ffffff" opacity="0.95"/>
+    <line x1="24" y1="20" x2="31" y2="20" stroke="#0f172a" stroke-width="0.8"/>
+    <g transform="translate(10, -18)">
+      <polygon points="0,6 30,2 38,5 8,9" fill="url(#ehBoxTop)"/>
+      <polygon points="0,6 8,9 8,24 0,21" fill="url(#ehBoxSide)"/>
+      <polygon points="8,9 38,5 38,20 8,24" fill="url(#ehBoxWarm)"/>
+    </g>
+  </g>
+
+  <g transform="translate(-10, 252)">
+    <polygon points="0,14 110,4 140,11 25,22" fill="#d97706"/>
+    <polygon points="0,14 25,22 25,58 0,50" fill="#92400e"/>
+    <polygon points="25,22 140,11 140,47 25,58" fill="#b45309"/>
+    <line x1="12" y1="18" x2="125" y2="7" stroke="#78350f" stroke-width="5" opacity="0.6"/>
+  </g>
+
+  <g transform="translate(730, 235)">
+    <polygon points="0,18 80,6 120,12 36,26" fill="#f59e0b"/>
+    <polygon points="0,18 36,26 36,65 0,56" fill="#92400e"/>
+    <polygon points="36,26 120,12 120,52 36,65" fill="#b45309"/>
+    <line x1="18" y1="22" x2="100" y2="9" stroke="#78350f" stroke-width="5" opacity="0.6"/>
+    <rect x="48" y="34" width="22" height="14" rx="1" fill="#ffffff" opacity="0.9"/>
+    <line x1="52" y1="38" x2="66" y2="38" stroke="#1e293b" stroke-width="1.2"/>
+    <line x1="52" y1="42" x2="62" y2="42" stroke="#1e293b" stroke-width="1.2"/>
+  </g>
+
+  <rect width="850" height="300" fill="url(#ehFloorSheen)" opacity="0.2" pointer-events="none"/>
+</svg>`;
+
+function isEastHubContext(warehouseName = '', warehouseCode = ''): boolean {
+  const normName = String(warehouseName || '').trim().toLowerCase();
+  const normCode = String(warehouseCode || '').trim().toUpperCase();
+
+  return (
+    normName === 'east hub warehouse' ||
+    normName.includes('east hub') ||
+    normName.includes('east distribution') ||
+    normCode === 'WH-EAST' ||
+    normCode.includes('EAST')
+  );
+}
+
+function renderWarehouseBackdrop(warehouseName = '', warehouseCode = ''): string {
+  if (isEastHubContext(warehouseName, warehouseCode)) {
+    return `<div class="warehouse-art-wrapper warehouse-art-vector warehouse-art-easthub">${eastHubSvg}</div>`;
+  }
+  return `<div class="warehouse-art-wrapper warehouse-art-vector">${warehouseSvg}</div>`;
+}
+
 const statCard = (type: IconName, label: string, value: string, meta: string, tone: string) => `
-  <article class="stat-card">
-    <div class="stat-icon ${tone}">${icon(type)}</div>
-    <div><span>${label}</span><strong>${value}</strong><small>${meta}</small></div>
+  <article class="stat-card ${tone}">
+    <span class="stat-icon">${icon(type)}</span>
+    <div><small>${label}</small><b>${value}</b><p>${meta}</p></div>
   </article>`;
 
-const locationZone = (location: WarehouseLocation, index: number) => {
-  const percent = utilization(location.currentUsage, location.maximumCapacity);
-  return `<button class="location-zone location-${index + 1} ${capacityTone(percent)}" data-location-id="${location.id}" data-location-code="${location.code}" style="--util:${percent}%" aria-label="Open ${location.name} details">
-    <span class="location-percent">${percent}%</span><small>USED</small>
-    <span class="location-progress"><i></i></span>
-    <span class="location-counts"><b>${location.skuCount} SKUs</b><b>${location.currentUsage} units</b></span>
-    <span class="location-tooltip"><strong>${location.name}</strong><b>${percent}% utilized</b><span>${location.currentUsage} / ${location.maximumCapacity} units</span><span>${location.skuCount} SKUs · ${location.lowStockCount} low stock</span></span>
+const locationZone = (location: any, index = 0) => {
+  const percent = Number(location.maximumCapacity) > 0
+    ? Math.round(Number(location.currentUsage) / Number(location.maximumCapacity) * 100)
+    : 0;
+  const tone = capacityTone(percent);
+  return `<button class="location-zone location-${index + 1} ${tone}" data-location-id="${location.id}" data-location-code="${esc(location.code)}" style="--util:${percent}%" aria-label="Open ${esc(location.name)} details">
+    <div class="location-zone-indicator">
+      <span class="loc-name" title="${esc(location.name)}"><span class="loc-name-icon">⌖</span>${esc(location.name)}</span>
+      <span class="loc-code">${esc(location.code)}</span>
+    </div>
+    <div class="location-zone-mid">
+      <span class="location-percent">${percent}%</span>
+      <small>USED</small>
+    </div>
+    <span class="location-progress"><i style="width:${Math.min(100, Math.max(0, percent))}%"></i></span>
+    <span class="location-counts">
+      <b>${location.skuCount ?? 0} SKUs</b>
+      <b>${Number(location.currentUsage ?? 0).toLocaleString()} units</b>
+    </span>
+    <span class="location-tooltip">
+      <strong>${esc(location.name)} (${esc(location.code)})</strong>
+      <b>${percent}% utilized</b>
+      <span>${Number(location.currentUsage ?? 0).toLocaleString()} / ${Number(location.maximumCapacity ?? 0).toLocaleString()} units</span>
+      <span>${location.skuCount ?? 0} SKUs · ${location.lowStockCount ?? 0} low stock</span>
+    </span>
   </button>`;
 };
+
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
@@ -152,12 +581,13 @@ app.innerHTML = `
               ${statCard('clock','Recently Updated','18','In the last 24 hours','purple')}
             </section>
             <section class="warehouse-card">
-              <div class="warehouse-title"><span>Main Warehouse</span></div>
-              ${warehouseSvg}
-              <div class="warehouse-summary" aria-live="polite"><span><b>${overallUtilization}%</b><small>Overall capacity</small></span><i></i><span><b>${totalCurrent.toLocaleString()}</b><small>Occupied units</small></span><i></i><span><b>${totalCapacity.toLocaleString()}</b><small>Total capacity</small></span><i></i><span><b>12</b><small>Locations</small></span></div>
-              <div class="utilization-overlay">${warehouseData.locations.map(locationZone).join('')}</div>
+              <div class="warehouse-title"><span id="warehouseCardTitle">Main Warehouse</span></div>
+              <button class="widget-config-btn" id="configureWarehouseSlots" type="button" title="Configure pinned location slots">⚙ Pin Slots</button>
+              <div id="warehouseBackdrop" class="warehouse-backdrop-container">${renderWarehouseBackdrop('Main Warehouse', 'MAIN')}</div>
+              <div class="warehouse-summary" aria-live="polite"><span><b>0%</b><small>Overall capacity</small></span><i></i><span><b>0</b><small>Occupied units</small></span><i></i><span><b>0</b><small>Total capacity</small></span><i></i><span><b>0</b><small>Locations</small></span></div>
+              <div class="utilization-overlay" id="warehouseOverlay"></div>
               <div class="capacity-legend"><span><i class="healthy"></i>Healthy</span><span><i class="full"></i>Getting full</span><span><i class="high"></i>High</span><span><i class="critical"></i>Critical</span></div>
-              <div class="mobile-capacity-list"><div class="mobile-overall"><span>Warehouse Capacity</span><b>${overallUtilization}%</b><small>${totalCurrent.toLocaleString()} of ${totalCapacity.toLocaleString()} units occupied</small></div>${warehouseData.locations.map(location => { const percent = utilization(location.currentUsage, location.maximumCapacity); return `<button class="mobile-location ${capacityTone(percent)}" data-location-id="${location.id}" data-location-code="${location.code}" style="--util:${percent}%"><span><b>${location.name}</b><small>${location.skuCount} SKUs · ${location.currentUsage} units</small></span><strong>${percent}%</strong><i><em></em></i>${icon('chevron')}</button>`; }).join('')}</div>
+              <div class="mobile-capacity-list" id="mobileCapacityList"><div class="mobile-overall"><span>Warehouse Capacity</span><b>0%</b><small>0 of 0 units occupied</small></div></div>
             </section>
             <section class="inventory-card warehouse-insights" aria-label="Read-only warehouse inventory overview">
               <div class="insight-heading"><div><h2>Warehouse Inventory Overview</h2><p>Live aggregate metrics by storage section</p></div><span><i></i>Live · Read only</span></div>
@@ -208,9 +638,23 @@ document.querySelector('#themeButton')?.addEventListener('click', () => {
 });
 if (localStorage.getItem('stockhub-theme') === 'dark') document.documentElement.classList.add('dark');
 
+const pageDescriptions: Record<string, string> = {
+  'Dashboard': 'Overview of your inventory and warehouse',
+  'Inventory': 'Manage items, stock levels, and warehouse assignments',
+  'Stock Tracking': 'Complete audit trail of inventory quantity changes',
+  'Categories': 'Organize inventory using reusable categories',
+  'Locations': 'Monitor capacity and utilization across physical storage locations',
+  'Plans': 'Weekly operational targets, managerial objectives, and daily floor activity logs',
+  'Reports': 'Live inventory valuation and category breakdown',
+  'Settings': 'Account, session, and system configuration'
+};
+
 document.querySelectorAll<HTMLElement>('.nav-item').forEach(el => el.addEventListener('click', async () => {
   const label=el.dataset.label!;document.body.classList.toggle('categories-active',label==='Categories');document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));el.classList.add('active');
-  document.querySelector('.page-title h1')!.textContent=label;const dashboard=document.querySelector<HTMLElement>('#dashboardPage')!;const module=document.querySelector<HTMLElement>('#modulePage')!;
+  document.querySelector('.page-title h1')!.textContent=label;
+  const pageSubtitle=document.querySelector<HTMLElement>('.page-title p');
+  if(pageSubtitle)pageSubtitle.textContent=pageDescriptions[label]??'';
+  const dashboard=document.querySelector<HTMLElement>('#dashboardPage')!;const module=document.querySelector<HTMLElement>('#modulePage')!;
   if(label==='Dashboard'){dashboard.hidden=false;module.hidden=true;await Promise.all([hydrateDashboard(),loadWarehouseDashboard()]);}else{dashboard.hidden=true;module.hidden=false;module.innerHTML='<div class="module-loading page-loader">Loading…</div>';await renderModule(label as any,module);}
   const currentQuery=document.querySelector<HTMLInputElement>('#globalSearch')?.value??'';if(currentQuery)filterRows(currentQuery);
   if(innerWidth<=1100)closePanels();window.scrollTo({top:0,behavior:'smooth'});
@@ -227,17 +671,23 @@ const filterRows = (query = '') => {
 document.querySelector<HTMLInputElement>('#globalSearch')?.addEventListener('input', e => filterRows((e.target as HTMLInputElement).value));
 window.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); document.querySelector<HTMLInputElement>('#globalSearch')?.focus(); } });
 
-const renderLocationDetails = (location: WarehouseLocation) => {
-  const percent = utilization(location.currentUsage, location.maximumCapacity);
+const renderLocationDetails = (location: any) => {
+  const currentUsage = Number(location.currentUsage ?? 0);
+  const maximumCapacity = Number(location.maximumCapacity ?? 0);
+  const percent = utilization(currentUsage, maximumCapacity);
   const tone = capacityTone(percent);
+  const sublocations = Array.isArray(location.sublocations) ? location.sublocations : [];
+  const items = Array.isArray(location.items) ? location.items : [];
+  const typeLabel = location.locationType === 'WAREHOUSE' ? 'Warehouse facility' : location.locationType === 'SECTION' ? 'Storage section' : 'Storage slot';
+
   document.querySelector('#locationDrawerContent')!.innerHTML = `
-    <div class="drawer-head"><div><small>Warehouse location</small><h2>${location.name}</h2></div><button class="close-location">${icon('close')}</button></div>
+    <div class="drawer-head"><div><small>${typeLabel}</small><h2>${esc(location.name)}</h2></div><button class="close-location">${icon('close')}</button></div>
     <div class="location-detail-body">
-      <div class="location-code"><span>${location.code}</span><div><b>Location Code</b><small>Main Warehouse · Active</small></div></div>
-      <section class="detail-capacity ${tone}" style="--util:${percent}%"><div><span>Utilization</span><strong>${percent}%</strong></div><div class="detail-progress"><i></i></div><small>${location.currentUsage} of ${location.maximumCapacity} units occupied</small></section>
-      <div class="detail-stats"><span><b>${location.skuCount}</b><small>Total SKUs</small></span><span><b>${location.currentUsage}</b><small>Total Units</small></span><span><b>${location.lowStockCount}</b><small>Low Stock</small></span><span><b>${location.outOfStockCount}</b><small>Out of Stock</small></span></div>
-      <section class="sublocations"><div class="detail-heading"><h3>Sublocations</h3><small>Capacity utilization</small></div><div class="sublocation-grid">${location.sublocations.map(sub => { const subPercent = utilization(sub.currentUsage, sub.maximumCapacity); return `<div class="sublocation ${capacityTone(subPercent)}" style="--util:${subPercent}%"><span><b>${sub.code}</b><strong>${subPercent}%</strong></span><i><em></em></i><small>${sub.currentUsage} / ${sub.maximumCapacity} units</small></div>`; }).join('')}</div></section>
-      <section class="location-items"><div class="detail-heading"><h3>Items in this location</h3><small>Showing ${location.items.length} items</small></div>${location.items.slice(0,5).map(item => `<div class="location-item"><span class="mini-box">${icon('box')}</span><div><b>${item.name}</b><small>${item.code} · ${item.units} units</small></div><span class="pill ${item.status === 'Low Stock' ? 'orange' : 'green'}">${item.status}</span></div>`).join('')}<button class="view-location-items" data-code="${location.code}">View all items ${icon('arrow')}</button></section>
+      <div class="location-code"><span>${esc(location.code)}</span><div><b>Location Code</b><small>${esc(location.parentName ?? 'Main Warehouse')} · Active</small></div></div>
+      <section class="detail-capacity ${tone}" style="--util:${percent}%"><div><span>Utilization</span><strong>${percent}%</strong></div><div class="detail-progress"><i></i></div><small>${currentUsage.toLocaleString()} of ${maximumCapacity.toLocaleString()} units occupied</small></section>
+      <div class="detail-stats"><span><b>${Number(location.skuCount ?? 0).toLocaleString()}</b><small>Total SKUs</small></span><span><b>${currentUsage.toLocaleString()}</b><small>Total Units</small></span><span><b>${Number(location.lowStockCount ?? 0).toLocaleString()}</b><small>Low Stock</small></span><span><b>${Number(location.outOfStockCount ?? 0).toLocaleString()}</b><small>Out of Stock</small></span></div>
+      ${sublocations.length ? `<section class="sublocations"><div class="detail-heading"><h3>Sublocations</h3><small>Capacity utilization</small></div><div class="sublocation-grid">${sublocations.map((sub: any) => { const subPercent = utilization(Number(sub.currentUsage ?? 0), Number(sub.maximumCapacity ?? 0)); return `<div class="sublocation ${capacityTone(subPercent)}" style="--util:${subPercent}%"><span><b>${esc(sub.code)}</b><strong>${subPercent}%</strong></span><i><em></em></i><small>${Number(sub.currentUsage ?? 0).toLocaleString()} / ${Number(sub.maximumCapacity ?? 0).toLocaleString()} units</small></div>`; }).join('')}</div></section>` : ''}
+      <section class="location-items"><div class="detail-heading"><h3>Items in this location</h3><small>Showing ${items.length} items</small></div>${items.length ? items.slice(0,5).map((item: any) => `<div class="location-item"><span class="mini-box">${icon('box')}</span><div><b>${esc(item.name)}</b><small>${esc(item.code)} · ${Number(item.units).toLocaleString()} units</small></div><span class="pill ${item.status === 'Low Stock' ? 'orange' : 'green'}">${esc(item.status)}</span></div>`).join('') : '<p style="color:var(--muted);font-size:11px;padding:12px 0;">No active items currently stored in this location.</p>'}${items.length ? `<button class="view-location-items" data-code="${esc(location.code)}">View all items ${icon('arrow')}</button>` : ''}</section>
     </div>`;
   locationDrawer.classList.add('open');
   locationDrawer.setAttribute('aria-hidden','false');
@@ -249,59 +699,290 @@ const renderLocationDetails = (location: WarehouseLocation) => {
   });
 };
 
-window.addEventListener('stockhub:view-location',async event=>{const id=Number((event as CustomEvent<{id:number}>).detail?.id);if(!id)return;try{const live:any=await apiRequest(`/locations/${id}`);renderLocationDetails({...live,currentUsage:Number(live.currentUsage??0),maximumCapacity:Number(live.maximumCapacity??0),skuCount:Number(live.skuCount??0),lowStockCount:Number(live.lowStockCount??0),outOfStockCount:Number(live.outOfStockCount??0),sublocations:live.sublocations??[],items:live.items??[]});}catch(error){showError(error instanceof Error?error.message:'Location details could not be loaded.');}});
-
-document.querySelectorAll<HTMLElement>('[data-location-id]').forEach(section => section.addEventListener('click', async () => {
-  const location = warehouseData.locations.find(candidate => candidate.code === section.dataset.locationCode)
-    ?? warehouseData.locations.find(candidate => candidate.id === Number(section.dataset.locationId));
-  if(location){try{const live:any=await apiRequest(`/locations/${location.id}`);renderLocationDetails({...location,...live,skuCount:Number(live.skuCount??0),lowStockCount:Number(live.lowStockCount??0),outOfStockCount:Number(live.outOfStockCount??0)});}catch{renderLocationDetails(location);}}
-}));
+window.addEventListener('stockhub:view-location', async event => {
+  const id = Number((event as CustomEvent<{id:number}>).detail?.id);
+  if (!id) return;
+  try {
+    const live: any = await apiRequest(`/locations/${id}`);
+    renderLocationDetails({
+      ...live,
+      currentUsage: Number(live.currentUsage ?? 0),
+      maximumCapacity: Number(live.maximumCapacity ?? 0),
+      skuCount: Number(live.skuCount ?? 0),
+      lowStockCount: Number(live.lowStockCount ?? 0),
+      outOfStockCount: Number(live.outOfStockCount ?? 0),
+      sublocations: live.sublocations ?? [],
+      items: live.items ?? []
+    });
+  } catch (error) {
+    showError(error instanceof Error ? error.message : 'Location details could not be loaded.');
+  }
+});
 
 function applyWarehouseData(data: DashboardWarehouse): void {
+  const title = document.querySelector<HTMLElement>('#warehouseCardTitle');
+  if (title) title.textContent = data.name;
+
+  const backdrop = document.querySelector<HTMLElement>('#warehouseBackdrop');
+  if (backdrop) {
+    backdrop.innerHTML = renderWarehouseBackdrop(data.name, data.code);
+  }
+
+  const card = document.querySelector<HTMLElement>('.warehouse-card');
+  if (card) {
+    const isEast = isEastHubContext(data.name, data.code);
+    card.classList.toggle('has-image-backdrop', false);
+    card.classList.toggle('is-easthub-context', isEast);
+  }
+
   const summaryValues = document.querySelectorAll<HTMLElement>('.warehouse-summary span b');
   const summary = [data.utilizationPercentage, data.currentUsage, data.maximumCapacity, data.locationCount];
   summaryValues.forEach((element, index) => element.textContent = index === 0 ? `${Math.round(summary[index] ?? 0)}%` : Number(summary[index] ?? 0).toLocaleString());
-  const mobileOverall = document.querySelector<HTMLElement>('.mobile-overall');
-  if (mobileOverall) mobileOverall.innerHTML = `<span>Warehouse Capacity</span><b>${Math.round(data.utilizationPercentage)}%</b><small>${data.currentUsage.toLocaleString()} of ${data.maximumCapacity.toLocaleString()} units occupied</small>`;
 
-  data.locations.forEach(apiLocation => {
-    const local = warehouseData.locations.find(location => location.code === apiLocation.code);
-    if (local) Object.assign(local, { id: apiLocation.id, name: apiLocation.name, currentUsage: apiLocation.currentUsage, maximumCapacity: apiLocation.maximumCapacity, skuCount: apiLocation.skuCount, lowStockCount: apiLocation.lowStockCount, outOfStockCount: apiLocation.outOfStockCount });
-    const percent = Math.round(apiLocation.utilizationPercentage);
-    const zone = document.querySelector<HTMLElement>(`.location-zone[data-location-code="${apiLocation.code}"]`);
-    if (zone) {
-      zone.dataset.locationId = String(apiLocation.id);
-      zone.classList.remove('healthy','full','high','critical'); zone.classList.add(capacityTone(percent)); zone.style.setProperty('--util', `${percent}%`);
-      zone.querySelector<HTMLElement>('.location-percent')!.textContent = `${percent}%`;
-      const counts = zone.querySelectorAll<HTMLElement>('.location-counts b'); counts[0]!.textContent = `${apiLocation.skuCount} SKUs`; counts[1]!.textContent = `${apiLocation.currentUsage} units`;
-      const tooltipRoot = zone.querySelector<HTMLElement>('.location-tooltip')!;
-      tooltipRoot.querySelector('strong')!.textContent = apiLocation.name;
-      tooltipRoot.querySelector('b')!.textContent = `${percent}% utilized`;
-      const tooltip = tooltipRoot.querySelectorAll<HTMLElement>('span');
-      tooltip[0]!.textContent = `${apiLocation.currentUsage} / ${apiLocation.maximumCapacity} units`;
-      tooltip[1]!.textContent = `${apiLocation.skuCount} SKUs · ${apiLocation.lowStockCount} low stock`;
-    }
-    const mobile = document.querySelector<HTMLElement>(`.mobile-location[data-location-code="${apiLocation.code}"]`);
-    if (mobile) mobile.dataset.locationId = String(apiLocation.id);
-  });
-  const summaryRows=document.querySelector<HTMLElement>('#warehouseSummaryRows');
-  if(summaryRows)summaryRows.innerHTML=data.locations.length?data.locations.map(location=>{const percent=Math.round(location.utilizationPercentage);const remaining=Number(location.maximumCapacity)-Number(location.currentUsage);const status=percent>100?'Over Capacity':percent>=85?'Near Capacity':percent>=70?'Monitor':'Healthy';const tone=percent>100?'red':percent>=85?'orange':'green';return`<tr><td><b>${location.name}</b><small>${location.code}</small></td><td>${Number(location.skuCount).toLocaleString()}</td><td>${Number(location.currentUsage).toLocaleString()}</td><td>${Number(location.maximumCapacity).toLocaleString()} units</td><td><b>${percent}%</b><div class="progress"><i class="${tone==='green'?'green':'orange'}" style="width:${Math.min(100,Math.max(0,percent))}%"></i></div></td><td>${Number(location.lowStockCount).toLocaleString()}</td><td>${Number(location.outOfStockCount).toLocaleString()}</td><td><span class="pill ${tone}">${status}</span><small>${remaining>=0?`${remaining.toLocaleString()} units available`:`${Math.abs(remaining).toLocaleString()} units over`}</small></td></tr>`;}).join(''):`<tr><td colspan="8">No active warehouse sections found.</td></tr>`;
-  document.querySelector('.warehouse-card')?.classList.remove('is-loading','has-data-error');
+  const overlay = document.querySelector<HTMLElement>('#warehouseOverlay');
+  if (overlay) {
+    overlay.className = 'utilization-overlay' + (data.locations.length > 4 ? ' layout-multi' : '');
+    overlay.innerHTML = data.locations.length
+      ? data.locations.map((loc, idx) => locationZone(loc, idx)).join('')
+      : '<div style="color:var(--muted);font-size:12px;background:rgba(255,255,255,.94);padding:14px 20px;border-radius:9px;border:1px dashed var(--line);pointer-events:auto;box-shadow:0 4px 12px rgba(0,0,0,.08);text-align:center;">No locations pinned to this widget.<br><button type="button" id="btnOverlayPinSlots" style="margin-top:8px;font-size:11px;padding:4px 10px;border-radius:6px;background:#1663c7;color:#fff;border:0;cursor:pointer;font-weight:700;">⚙ Configure Pinned Slots</button></div>';
+    overlay.querySelectorAll<HTMLElement>('[data-location-id]').forEach(zone => {
+      zone.onclick = () => window.dispatchEvent(new CustomEvent('stockhub:view-location', { detail: { id: Number(zone.dataset.locationId) } }));
+    });
+    overlay.querySelector('#btnOverlayPinSlots')?.addEventListener('click', openSlotConfigModal);
+  }
+
+  const mobileList = document.querySelector<HTMLElement>('#mobileCapacityList');
+  if (mobileList) {
+    mobileList.innerHTML = `<div class="mobile-overall"><span>Warehouse Capacity</span><b>${Math.round(data.utilizationPercentage)}%</b><small>${data.currentUsage.toLocaleString()} of ${data.maximumCapacity.toLocaleString()} units occupied</small></div>` +
+      data.locations.map(location => {
+        const percent = Math.round(location.utilizationPercentage ?? utilization(location.currentUsage, location.maximumCapacity));
+        return `<button class="mobile-location ${capacityTone(percent)}" data-location-id="${location.id}" data-location-code="${esc(location.code)}" style="--util:${percent}%"><span><b>${esc(location.name)}</b><small>${location.skuCount} SKUs · ${location.currentUsage} units</small></span><strong>${percent}%</strong><i><em></em></i>${icon('chevron')}</button>`;
+      }).join('');
+    mobileList.querySelectorAll<HTMLElement>('[data-location-id]').forEach(btn => {
+      btn.onclick = () => window.dispatchEvent(new CustomEvent('stockhub:view-location', { detail: { id: Number(btn.dataset.locationId) } }));
+    });
+  }
+
+  const summaryRows = document.querySelector<HTMLElement>('#warehouseSummaryRows');
+  if (summaryRows) summaryRows.innerHTML = data.locations.length ? data.locations.map(location => {
+    const percent = Math.round(location.utilizationPercentage);
+    const remaining = Number(location.maximumCapacity) - Number(location.currentUsage);
+    const status = percent > 100 ? 'Over Capacity' : percent >= 85 ? 'Near Capacity' : percent >= 70 ? 'Monitor' : 'Healthy';
+    const tone = percent > 100 ? 'red' : percent >= 85 ? 'orange' : 'green';
+    return `<tr><td><b>${esc(location.name)}</b><small>${esc(location.code)}</small></td><td>${Number(location.skuCount).toLocaleString()}</td><td>${Number(location.currentUsage).toLocaleString()}</td><td>${Number(location.maximumCapacity).toLocaleString()} units</td><td><b>${percent}%</b><div class="progress"><i class="${tone === 'green' ? 'green' : 'orange'}" style="width:${Math.min(100, Math.max(0, percent))}%"></i></div></td><td>${Number(location.lowStockCount).toLocaleString()}</td><td>${Number(location.outOfStockCount).toLocaleString()}</td><td><span class="pill ${tone}">${status}</span><small>${remaining >= 0 ? `${remaining.toLocaleString()} units available` : `${Math.abs(remaining).toLocaleString()} units over`}</small></td></tr>`;
+  }).join('') : `<tr><td colspan="8">No active locations pinned for this warehouse. Click ⚙ Pin Slots above to configure.</td></tr>`;
+
+  document.querySelector('.warehouse-card')?.classList.remove('is-loading', 'has-data-error');
 }
 
 async function loadWarehouseDashboard(): Promise<void> {
   const card = document.querySelector<HTMLElement>('.warehouse-card');
-  card?.classList.add('is-loading'); card?.setAttribute('aria-busy','true');
-  try { applyWarehouseData(await dashboardApi.getWarehouse()); }
+  card?.classList.add('is-loading'); card?.setAttribute('aria-busy', 'true');
+  try {
+    const slotIds = getStoredPinnedSlotIds(activeWarehouseId);
+    const data = await dashboardApi.getWarehouse(activeWarehouseId, slotIds);
+    applyWarehouseData(data);
+  }
   catch {
     card?.classList.add('has-data-error');
-    document.querySelectorAll<HTMLElement>('.location-zone').forEach(zone => {
-      zone.querySelector<HTMLElement>('.location-percent')!.textContent = '—';
-      zone.querySelectorAll<HTMLElement>('.location-counts b').forEach(value => value.textContent = 'Unavailable');
-      zone.setAttribute('aria-label', 'Warehouse utilization data unavailable');
-    });
+    const overlay = document.querySelector<HTMLElement>('#warehouseOverlay');
+    if (overlay) overlay.innerHTML = '<div style="color:var(--muted);font-size:12px;background:rgba(255,255,255,.94);padding:14px 20px;border-radius:9px;border:1px solid var(--line);pointer-events:auto;">Warehouse utilization data is temporarily unavailable.</div>';
   }
-  finally { card?.classList.remove('is-loading'); card?.setAttribute('aria-busy','false'); }
+  finally {
+    card?.classList.remove('is-loading'); card?.setAttribute('aria-busy', 'false');
+  }
+}
+
+async function openSlotConfigModal(): Promise<void> {
+  let allLocations: any[] = [];
+  try {
+    allLocations = await apiRequest('/locations');
+  } catch (err) {
+    showError('Could not load locations for widget configuration.');
+    return;
+  }
+
+  const warehouses = allLocations.filter((l: any) => l.locationType === 'WAREHOUSE');
+  const targetWh = warehouses.find((w: any) => w.id === activeWarehouseId) || warehouses[0];
+  const whId = targetWh ? targetWh.id : (activeWarehouseId || 1);
+
+  const storedIds = getStoredPinnedSlotIds(whId);
+  const selectedIds = new Set<number>(storedIds ?? []);
+
+  const whSections = allLocations.filter((l: any) =>
+    l.locationType === 'SECTION' && (whId === undefined || l.parentLocationId === whId)
+  );
+  const secIds = new Set(whSections.map(s => s.id));
+  const whSlots = allLocations.filter((l: any) =>
+    (l.locationType === 'SLOT' || l.locationType === 'STORAGE') &&
+    (secIds.has(l.parentLocationId) || l.parentLocationId === whId)
+  );
+
+  const sectionSlotsMap = new Map<number, any[]>();
+  whSections.forEach(sec => sectionSlotsMap.set(sec.id, []));
+  whSlots.forEach(slot => {
+    if (sectionSlotsMap.has(slot.parentLocationId)) {
+      sectionSlotsMap.get(slot.parentLocationId)!.push(slot);
+    }
+  });
+
+  const overlay = document.createElement('div');
+  overlay.className = 'slot-config-overlay';
+  overlay.innerHTML = `
+    <section class="slot-config-dialog" role="dialog" aria-modal="true">
+      <div class="slot-config-header">
+        <div>
+          <h2>Configure Warehouse Monitoring Slots</h2>
+          <p>Choose up to 6 locations or sub-locations to pin to your Dashboard widget for real-time tracking.</p>
+        </div>
+        <button class="app-dialog-close" type="button" aria-label="Close">×</button>
+      </div>
+
+      <div class="slot-config-controls">
+        <input type="search" class="slot-search-input" placeholder="Search sections and slots by name or code...">
+        <span class="slot-count-badge">Pinned: <b id="slotCountDisplay">${selectedIds.size}</b> / 6</span>
+      </div>
+
+      <div class="slot-tree-container" id="slotTreeContainer"></div>
+
+      <div class="slot-config-footer">
+        <button type="button" class="btn-reset">Reset to Default</button>
+        <div class="footer-actions">
+          <button type="button" class="btn-cancel">Cancel</button>
+          <button type="button" class="btn-save">Save Configuration</button>
+        </div>
+      </div>
+    </section>
+  `;
+  document.body.appendChild(overlay);
+
+  const closeDialog = () => {
+    overlay.classList.remove('show');
+    setTimeout(() => overlay.remove(), 220);
+  };
+
+  overlay.querySelector('.app-dialog-close')?.addEventListener('click', closeDialog);
+  overlay.querySelector('.btn-cancel')?.addEventListener('click', closeDialog);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeDialog(); });
+
+  const treeContainer = overlay.querySelector<HTMLElement>('#slotTreeContainer')!;
+  const countDisplay = overlay.querySelector<HTMLElement>('#slotCountDisplay')!;
+  const searchInput = overlay.querySelector<HTMLInputElement>('.slot-search-input')!;
+
+  const updateCount = () => {
+    countDisplay.textContent = String(selectedIds.size);
+  };
+
+  const renderTree = (filterQuery = '') => {
+    const q = filterQuery.trim().toLowerCase();
+    let html = '';
+
+    whSections.forEach(sec => {
+      const slots = sectionSlotsMap.get(sec.id) ?? [];
+      const secMatches = !q || sec.name.toLowerCase().includes(q) || sec.code.toLowerCase().includes(q);
+      const matchingSlots = slots.filter(slot => !q || slot.name.toLowerCase().includes(q) || slot.code.toLowerCase().includes(q));
+
+      if (!secMatches && matchingSlots.length === 0) return;
+
+      const secPct = utilization(sec.currentUsage, sec.maximumCapacity);
+      const secTone = capacityTone(secPct);
+
+      html += `<div class="slot-group-header">Section: ${esc(sec.name)} (${esc(sec.code)})</div>`;
+
+      const isSecSelected = selectedIds.has(sec.id);
+      html += `
+        <label class="slot-check-item ${isSecSelected ? 'selected' : ''}" data-item-id="${sec.id}">
+          <div class="slot-check-main">
+            <input type="checkbox" data-id="${sec.id}" ${isSecSelected ? 'checked' : ''}>
+            <div class="slot-check-info">
+              <b>${esc(sec.name)}</b>
+              <code>${esc(sec.code)}</code>
+            </div>
+          </div>
+          <div class="slot-check-meta">
+            <small>${Number(sec.currentUsage).toLocaleString()} / ${Number(sec.maximumCapacity).toLocaleString()} units</small>
+            <span class="slot-check-chip ${secTone}">${secPct}%</span>
+          </div>
+        </label>
+      `;
+
+      const slotsToDisplay = q ? matchingSlots : slots;
+      slotsToDisplay.forEach(slot => {
+        const slotPct = utilization(slot.currentUsage, slot.maximumCapacity);
+        const slotTone = capacityTone(slotPct);
+        const isSlotSelected = selectedIds.has(slot.id);
+        html += `
+          <label class="slot-check-item slot-check-sub ${isSlotSelected ? 'selected' : ''}" data-item-id="${slot.id}">
+            <div class="slot-check-main">
+              <span style="color:#7b93b2;font-weight:700;">↳</span>
+              <input type="checkbox" data-id="${slot.id}" ${isSlotSelected ? 'checked' : ''}>
+              <div class="slot-check-info">
+                <b>${esc(slot.name)}</b>
+                <code>${esc(slot.code)}</code>
+              </div>
+            </div>
+            <div class="slot-check-meta">
+              <small>${Number(slot.currentUsage).toLocaleString()} / ${Number(slot.maximumCapacity).toLocaleString()} units</small>
+              <span class="slot-check-chip ${slotTone}">${slotPct}%</span>
+            </div>
+          </label>
+        `;
+      });
+    });
+
+    if (!html) html = `<div style="text-align:center;padding:24px;color:var(--muted);font-size:12px;">No locations match "${esc(filterQuery)}".</div>`;
+    treeContainer.innerHTML = html;
+
+    treeContainer.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => {
+      cb.onchange = () => {
+        const id = Number(cb.dataset.id);
+        const itemLabel = cb.closest('.slot-check-item');
+        if (cb.checked) {
+          if (selectedIds.size >= 6) {
+            cb.checked = false;
+            showError('You can pin a maximum of 6 locations to the widget.');
+            return;
+          }
+          selectedIds.add(id);
+          itemLabel?.classList.add('selected');
+        } else {
+          selectedIds.delete(id);
+          itemLabel?.classList.remove('selected');
+        }
+        updateCount();
+      };
+    });
+  };
+
+  renderTree();
+  searchInput.oninput = () => renderTree(searchInput.value);
+
+  overlay.querySelector('.btn-reset')?.addEventListener('click', () => {
+    selectedIds.clear();
+    setStoredPinnedSlotIds(whId, undefined);
+    closeDialog();
+    loadWarehouseDashboard();
+    document.querySelector('#toastText')!.textContent = 'Widget reset to default warehouse sections.';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3500);
+  });
+
+  overlay.querySelector('.btn-save')?.addEventListener('click', () => {
+    const ids = Array.from(selectedIds);
+    setStoredPinnedSlotIds(whId, ids.length > 0 ? ids : undefined);
+    closeDialog();
+    loadWarehouseDashboard();
+    document.querySelector('#toastText')!.textContent = ids.length > 0
+      ? `Widget pinned slots updated (${ids.length} locations).`
+      : 'Widget reset to default sections.';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3500);
+  });
+
+  requestAnimationFrame(() => {
+    overlay.classList.add('show');
+    searchInput.focus();
+  });
 }
 
 const openModule=(label:string)=>document.querySelector<HTMLButtonElement>(`.nav-item[data-label="${label}"]`)?.click();
@@ -310,13 +991,13 @@ async function hydrateDashboard():Promise<void>{
     const [summary,alerts,transactions,locations]:any[]=await Promise.all([
       apiRequest('/reports/inventory-summary'),apiRequest('/alerts'),apiRequest('/transactions?limit=5'),apiRequest('/locations')
     ]);
-    const statValues=document.querySelectorAll<HTMLElement>('.stat-card strong');
+    const statValues=document.querySelectorAll<HTMLElement>('.stat-card b');
     if(statValues[0])statValues[0].textContent=Number(summary.totalItems).toLocaleString();
     if(statValues[1])statValues[1].textContent=formatPeso(summary.inventoryValue);
     if(statValues[2])statValues[2].textContent=Number(summary.lowStockItems).toLocaleString();
     const recentlyUpdated=transactions.transactions.filter((transaction:any)=>Date.now()-new Date(transaction.createdAt).getTime()<=86_400_000).length;
     if(statValues[3])statValues[3].textContent=recentlyUpdated.toLocaleString();
-    const statMeta=document.querySelectorAll<HTMLElement>('.stat-card small');
+    const statMeta=document.querySelectorAll<HTMLElement>('.stat-card p');
     if(statMeta[0])statMeta[0].textContent='Active inventory SKUs';
     if(statMeta[1])statMeta[1].textContent='Current stock valuation';
     if(statMeta[2])statMeta[2].textContent=`${Number(summary.outOfStockItems).toLocaleString()} items out of stock`;
@@ -331,10 +1012,34 @@ async function hydrateDashboard():Promise<void>{
     activityRoot.innerHTML=transactions.transactions.length?transactions.transactions.slice(0,3).map((t:any)=>`<div class="activity-row"><span class="activity-icon blue">↔</span><span><b>${t.item} · ${t.transactionType.replaceAll('_',' ')}</b><small>${new Date(t.createdAt).toLocaleString()} by ${t.performedBy}</small></span></div>`).join(''):`<div class="rail-empty">No recent activity</div>`;
     latestNotificationId=alerts.reduce((latest:number,alert:any)=>Math.max(latest,Number(alert.id)||0),0);const seenNotificationId=Number(localStorage.getItem(notificationSeenKey)||0);const unreadCount=alerts.filter((alert:any)=>Number(alert.id)>seenNotificationId).length;const badge=document.querySelector<HTMLElement>('#notificationButton span')!;badge.textContent=String(unreadCount);badge.hidden=unreadCount===0;
     const notificationBody=document.querySelector<HTMLElement>('#notificationPanel section')!;notificationBody.innerHTML=alerts.length?alerts.map((a:any)=>`<article><b>${a.type.replaceAll('_',' ')}</b><span>${a.message}</span><small>${new Date(a.createdAt).toLocaleString()}</small></article>`).join(''):`<div class="rail-empty">You are all caught up.</div>`;
-    const warehouses=locations.filter((l:any)=>l.locationType==='WAREHOUSE');const menu=document.querySelector<HTMLElement>('#warehouseMenu')!;menu.innerHTML=warehouses.map((w:any)=>`<button data-id="${w.id}"><b>${w.name}</b><small>${w.code}</small></button>`).join('')||'<span>No warehouses found</span>';
-    menu.querySelectorAll<HTMLButtonElement>('button').forEach(button=>button.onclick=()=>{document.querySelector('#warehouseSelector b')!.textContent=button.querySelector('b')!.textContent!;menu.classList.remove('show');});
+    const warehouses=locations.filter((l:any)=>l.locationType==='WAREHOUSE');
+    const currentWh=warehouses.find((w:any)=>w.id===activeWarehouseId)||warehouses[0];
+    if(currentWh){
+      activeWarehouseId=currentWh.id;
+      localStorage.setItem('stockhub.activeWarehouseId',String(activeWarehouseId));
+      const selectorText=document.querySelector('#warehouseSelector b');
+      if(selectorText)selectorText.textContent=currentWh.name;
+    }
+    const menu=document.querySelector<HTMLElement>('#warehouseMenu')!;
+    menu.innerHTML=warehouses.map((w:any)=>`<button data-id="${w.id}"><b>${esc(w.name)}</b><small>${esc(w.code)}</small></button>`).join('')||'<span>No warehouses found</span>';
+    menu.querySelectorAll<HTMLButtonElement>('button').forEach(button=>button.onclick=()=>{
+      activeWarehouseId = Number(button.dataset.id);
+      localStorage.setItem('stockhub.activeWarehouseId',String(activeWarehouseId));
+      document.querySelector('#warehouseSelector b')!.textContent=button.querySelector('b')!.textContent!;
+      menu.classList.remove('show');
+      loadWarehouseDashboard();
+      window.dispatchEvent(new CustomEvent('stockhub:warehouse-change', { detail: { warehouseId: activeWarehouseId } }));
+    });
   }catch(error){console.error('Dashboard hydration failed',error);throw error;}
 }
+
+document.addEventListener('click', e => {
+  const target = (e.target as HTMLElement)?.closest('#configureWarehouseSlots, #btnOverlayPinSlots');
+  if (target) {
+    e.preventDefault();
+    openSlotConfigModal();
+  }
+});
 
 
 toast.querySelector('button')?.addEventListener('click', () => toast.classList.remove('show'));
@@ -353,7 +1058,7 @@ let knownDataVersion: string | null = null;
 let liveRefreshInFlight = false;
 
 async function refreshActiveView(): Promise<boolean> {
-  if (drawer.classList.contains('open') || locationDrawer.classList.contains('open') || isDialogOpen()) return false;
+  if (drawer.classList.contains('open') || locationDrawer.classList.contains('open') || isDialogOpen() || Boolean(document.querySelector('.row-menu-popover.show'))) return false;
   const active = document.querySelector<HTMLElement>('.nav-item.active')?.dataset.label ?? 'Dashboard';
   if (active === 'Dashboard') await Promise.all([hydrateDashboard(), loadWarehouseDashboard()]);
   else await renderModule(active as any, document.querySelector<HTMLElement>('#modulePage')!);
@@ -374,7 +1079,7 @@ async function checkForLiveUpdates(): Promise<void> {
 function startLiveUpdates(): void {
   if (liveUpdateTimer !== undefined) return;
   void checkForLiveUpdates();
-  liveUpdateTimer = window.setInterval(() => void checkForLiveUpdates(), 5000);
+  liveUpdateTimer = window.setInterval(() => void checkForLiveUpdates(), 10000);
 }
 
 function stopLiveUpdates(): void {

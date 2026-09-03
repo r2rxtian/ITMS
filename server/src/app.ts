@@ -14,7 +14,18 @@ app.use(helmet());
 app.use(cors({ origin: env.CLIENT_ORIGIN, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
-app.use(rateLimit({ windowMs: 15 * 60_000, limit: 500, standardHeaders: true, legacyHeaders: false }));
+app.use(rateLimit({
+  windowMs: 15 * 60_000,
+  limit: env.NODE_ENV === 'production' ? 2000 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (request) => request.path === '/health' || request.path.endsWith('/sync/version'),
+  message: {
+    success: false,
+    message: 'Too many requests, please slow down and try again shortly.',
+    errors: []
+  }
+}));
 app.use(session({
   name: 'stockhub.sid', secret: env.SESSION_SECRET, store: new SqlSessionStore(), resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: 'lax', secure: env.NODE_ENV === 'production', maxAge: 8 * 60 * 60_000 }
