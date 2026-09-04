@@ -1,5 +1,6 @@
 import { apiRequest, ApiError } from '../services/api';
 import { confirmAction, showError, showFormDialog } from '../ui/dialog';
+import { buildLocationHierarchy, setupCascadingLocationChain } from '../ui/cascading-location';
 
 type PageName='Inventory'|'Stock Tracking'|'Categories'|'Locations'|'Plans'|'Reports'|'Settings';
 const esc=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -117,6 +118,175 @@ export function showLogin(onSuccess:()=>void){
 
 const warehouseTag=(name?:string,code?:string)=>{const norm=String(name||'').toLowerCase();const isEast=norm.includes('east')||String(code||'').toUpperCase().includes('EAST');const label=esc(name||'Main Warehouse');const codeTag=code?`<small class="wh-code">${esc(code)}</small>`:'';return`<span class="warehouse-badge ${isEast?'east-hub':'main-wh'}" title="Warehouse: ${label} (${esc(code||'')})"><span class="wh-icon">${isEast?'🏭':'🏢'}</span><b>${label}</b>${codeTag}</span>`;};
 
+function openAddItemModal(categories:any[],locations:any[],onSuccess:()=>Promise<void>){
+  const overlay=document.createElement('div');
+  overlay.className='app-dialog-overlay';
+  overlay.innerHTML=`
+    <section class="app-dialog add-item-dialog" role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
+      <h2 id="addItemModalTitle"><span>📦</span> Add New Inventory Item</h2>
+      <button class="app-dialog-close" type="button" aria-label="Close">×</button>
+      <form class="add-item-form">
+        <div class="form-section-title"><span>1</span> Item Identification</div>
+        <div class="form-grid-2">
+          <label>Item Name
+            <input name="name" required placeholder="e.g. Cordless screwdriver">
+          </label>
+          <label>SKU (Stock Keeping Unit)
+            <input name="sku" required placeholder="e.g. TL-001010" style="text-transform:uppercase">
+          </label>
+        </div>
+        <div class="form-grid-2">
+          <label>Category
+            <select name="categoryId" required>
+              <option value="">Select Category…</option>
+              ${categories.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label>Unit of Measure
+            <input name="unit" value="unit" required placeholder="unit, pcs, box, etc.">
+          </label>
+        </div>
+
+        <div class="form-section-title"><span>2</span> Stock Levels & Pricing</div>
+        <div class="form-grid-3">
+          <label>Initial Quantity
+            <input name="initialQuantity" type="number" min="0" value="0" required>
+          </label>
+          <label>Unit Cost (PHP ₱)
+            <input name="unitCost" type="number" min="0" step=".01" value="0.00" required>
+          </label>
+          <label>Reorder Level
+            <input name="reorderLevel" type="number" min="0" value="10" required>
+          </label>
+        </div>
+        <div class="form-grid-2">
+          <label>Maximum Stock Limit (Optional)
+            <input name="maximumStock" type="number" min="0" placeholder="Optional max cap">
+          </label>
+          <label>Initial Stock Reason
+            <input name="initialStockReason" value="Initial stock entered during item creation." required>
+          </label>
+        </div>
+
+        <div class="form-section-title"><span>3</span> Location Hierarchy & Assignment</div>
+        <div class="stepped-location-card">
+          <h4><span>📍</span> Storage Hierarchy Chain</h4>
+          <div class="stepped-field tier-warehouse-step">
+            <div class="stepped-field-header">
+              <span class="stepped-field-title">1. Facility / Warehouse</span>
+              <span class="tier-pill-badge tier-badge-warehouse">Facility</span>
+            </div>
+            <select name="warehouseId" id="addItemWarehouse" required>
+              <option value="">Select Facility / Warehouse…</option>
+            </select>
+          </div>
+          <div class="stepped-field tier-zone-step">
+            <div class="stepped-field-header">
+              <span class="stepped-field-title">2. Zone / Aisle / Shelf</span>
+              <span class="tier-pill-badge tier-badge-zone">Zone</span>
+            </div>
+            <select name="sectionId" id="addItemZone" required disabled>
+              <option value="">Select Warehouse first…</option>
+            </select>
+          </div>
+          <div class="stepped-field tier-slot-step">
+            <div class="stepped-field-header">
+              <span class="stepped-field-title">3. Target Storage Location (Bin / Shelf / Slot)</span>
+              <span class="tier-pill-badge tier-badge-slot">Pick Point</span>
+            </div>
+            <select name="locationId" id="addItemLocation" required disabled>
+              <option value="">Select Zone first…</option>
+            </select>
+          </div>
+          <div id="addItemBreadcrumb"></div>
+          <div id="addItemCapacityPill" hidden></div>
+        </div>
+
+        <label>Description / Technical Notes
+          <textarea name="description" placeholder="Optional item details, manufacturer notes, or handling instructions..."></textarea>
+        </label>
+
+        <div class="admin-dialog-actions">
+          <button type="button" class="cancel">Cancel</button>
+          <button type="submit" class="save" id="addItemSubmitBtn">Create Item</button>
+        </div>
+      </form>
+    </section>
+  `;
+
+  document.body.append(overlay);
+  requestAnimationFrame(()=>overlay.classList.add('show'));
+
+  const form=overlay.querySelector<HTMLFormElement>('.add-item-form')!;
+  const closeBtn=overlay.querySelector<HTMLButtonElement>('.app-dialog-close')!;
+  const cancelBtn=overlay.querySelector<HTMLButtonElement>('.cancel')!;
+  const submitBtn=overlay.querySelector<HTMLButtonElement>('#addItemSubmitBtn')!;
+
+  const close=()=>{
+    overlay.classList.remove('show');
+    setTimeout(()=>overlay.remove(),160);
+    window.removeEventListener('keydown',onKey);
+  };
+  const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape')close();};
+  window.addEventListener('keydown',onKey);
+
+  closeBtn.onclick=close;
+  cancelBtn.onclick=close;
+  overlay.onclick=(e)=>{if(e.target===overlay)close();};
+
+  const hierarchy=buildLocationHierarchy(locations);
+  setupCascadingLocationChain({
+    hierarchy,
+    warehouseSelect:form.querySelector<HTMLSelectElement>('#addItemWarehouse')!,
+    zoneSelect:form.querySelector<HTMLSelectElement>('#addItemZone')!,
+    locationSelect:form.querySelector<HTMLSelectElement>('#addItemLocation')!,
+    breadcrumbContainer:form.querySelector<HTMLElement>('#addItemBreadcrumb'),
+    pillContainer:form.querySelector<HTMLElement>('#addItemCapacityPill'),
+    quantityInput:form.querySelector<HTMLInputElement>('[name="initialQuantity"]'),
+    submitButton:submitBtn
+  });
+
+  form.onsubmit=async(e)=>{
+    e.preventDefault();
+    const fd=new FormData(form);
+    const bodyPayload={
+      name:String(fd.get('name')||'').trim(),
+      sku:String(fd.get('sku')||'').trim().toUpperCase(),
+      description:fd.get('description')||null,
+      categoryId:Number(fd.get('categoryId')),
+      warehouseId:Number(fd.get('warehouseId')),
+      locationId:Number(fd.get('locationId')),
+      unit:String(fd.get('unit')||'unit').trim(),
+      unitCost:Number(fd.get('unitCost')),
+      reorderLevel:Number(fd.get('reorderLevel')),
+      maximumStock:fd.get('maximumStock')?Number(fd.get('maximumStock')):null,
+      initialQuantity:Number(fd.get('initialQuantity')||0),
+      initialStockReason:String(fd.get('initialStockReason')||'Initial stock entered during item creation.').trim()
+    };
+
+    submitBtn.disabled=true;
+    submitBtn.textContent='Creating…';
+
+    try{
+      await apiRequest('/items',{method:'POST',body:JSON.stringify(bodyPayload)});
+      close();
+      window.dispatchEvent(new CustomEvent('stockhub:mutation'));
+      const toast=document.querySelector<HTMLElement>('#toast');
+      const toastText=document.querySelector<HTMLElement>('#toastText');
+      if(toast&&toastText){
+        toastText.textContent=`Item "${bodyPayload.name}" added successfully`;
+        toast.classList.add('show');
+        setTimeout(()=>toast.classList.remove('show'),3500);
+      }
+      await onSuccess();
+    }catch(err){
+      submitBtn.disabled=false;
+      submitBtn.textContent='Create Item';
+      showError(err instanceof Error?err.message:'Item could not be created.','Item creation failed');
+    }
+  };
+}
+
 async function inventory(root:HTMLElement){
   const session:any=await apiRequest('/auth/me');const isAdmin=session.user.role==='ADMIN';
   root.innerHTML=shell('Inventory','Manage items, stock levels, and warehouse assignments.',button('refreshItems','Refresh')+(isAdmin?button('addInventory','+ Add Item',true):''));root.querySelector('.module-view')?.classList.add('inventory-view');
@@ -127,7 +297,7 @@ async function inventory(root:HTMLElement){
     body.querySelectorAll<HTMLButtonElement>('.edit-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));try{const categories:any[]=await apiRequest('/categories');const values=await showFormDialog(`Edit ${item.name}`,[{name:'name',label:'Item name',value:item.name,required:true},{name:'description',label:'Description',value:item.description,type:'textarea'},{name:'categoryId',label:'Category',value:item.categoryId,type:'select',options:categories.map((entry:any)=>({label:entry.name,value:String(entry.id)}))},{name:'unitCost',label:'Unit cost (PHP ₱)',value:item.unitCost,type:'number',min:0,step:.01,required:true},{name:'reorderLevel',label:'Reorder level',value:item.reorderLevel,type:'number',min:0,required:true},{name:'maximumStock',label:'Maximum stock',value:item.maximumStock,type:'number',min:0}]);if(!values)return;await apiRequest(`/items/${item.id}`,{method:'PUT',body:JSON.stringify({name:values.name,description:values.description,categoryId:Number(values.categoryId),unitCost:Number(values.unitCost),reorderLevel:Number(values.reorderLevel),maximumStock:values.maximumStock?Number(values.maximumStock):null})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Item could not be updated.');}});
     body.querySelectorAll<HTMLButtonElement>('.archive-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));if(!await confirmAction(`Delete ${item.name}? Its transaction history will be preserved.`,'Delete inventory item'))return;try{await apiRequest(`/items/${item.id}`,{method:'DELETE'});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Item could not be deleted.');}});
   }catch(error){body.innerHTML=empty(error instanceof ApiError&&error.status===401?'Please sign in to view inventory.':'Inventory could not be loaded.');}};
-  root.querySelector<HTMLButtonElement>('#refreshItems')!.onclick=load;root.querySelector<HTMLButtonElement>('#addInventory')?.addEventListener('click',()=>document.querySelector<HTMLButtonElement>('#quickAdd')?.click());await load();
+  root.querySelector<HTMLButtonElement>('#refreshItems')!.onclick=load;root.querySelector<HTMLButtonElement>('#addInventory')?.addEventListener('click',async()=>{try{const [cats,locs]:any[]=await Promise.all([apiRequest('/categories'),apiRequest('/locations')]);openAddItemModal(cats,locs,load);}catch(e){showError(e instanceof Error?e.message:'Could not load form options.');}});await load();
 }
 
 async function transactions(root:HTMLElement){root.innerHTML=shell('Stock Tracking','Complete audit trail of inventory quantity changes.',button('refreshTransactions','Refresh'));const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{const data:any=await apiRequest('/transactions?limit=100');body.innerHTML=data.transactions.length?`<div class="module-table-wrap"><table class="module-table"><thead><tr><th>Date</th><th>SKU</th><th>Item</th><th>Type</th><th>Change</th><th>Previous → New</th><th>User</th><th>Reason</th></tr></thead><tbody>${data.transactions.map((t:any)=>`<tr><td>${new Date(t.createdAt).toLocaleString()}</td><td>${esc(t.sku)}</td><td>${esc(t.item)}</td><td>${esc(t.transactionType)}</td><td>${Number(t.quantityChange)>0?'+':''}${esc(t.quantityChange)}</td><td>${esc(t.previousQuantity)} → ${esc(t.newQuantity)}</td><td>${esc(t.performedBy)}</td><td>${esc(t.remarks)}</td></tr>`).join('')}</tbody></table></div>`:empty('Stock transactions will appear here.');}catch{body.innerHTML=empty('Transaction history could not be loaded.');}};root.querySelector<HTMLButtonElement>('#refreshTransactions')!.onclick=load;await load();}
@@ -151,7 +321,7 @@ async function inventoryPaged(root:HTMLElement){
     body.querySelectorAll<HTMLButtonElement>('.edit-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));const values=await showFormDialog(`Edit ${item.name}`,[{name:'name',label:'Item name',value:item.name,required:true},{name:'description',label:'Description',value:item.description,type:'textarea'},{name:'categoryId',label:'Category',value:item.categoryId,type:'select',options:categories.map((entry:any)=>({label:entry.name,value:String(entry.id)}))},{name:'unitCost',label:'Unit cost (PHP ₱)',value:item.unitCost,type:'number',min:0,step:.01,required:true},{name:'reorderLevel',label:'Reorder level',value:item.reorderLevel,type:'number',min:0,required:true},{name:'maximumStock',label:'Maximum stock',value:item.maximumStock,type:'number',min:0}]);if(!values)return;try{await apiRequest(`/items/${item.id}`,{method:'PUT',body:JSON.stringify({name:values.name,description:values.description,categoryId:Number(values.categoryId),unitCost:Number(values.unitCost),reorderLevel:Number(values.reorderLevel),maximumStock:values.maximumStock?Number(values.maximumStock):null})});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));}catch(error){showError(error instanceof Error?error.message:'Item could not be updated.');}});
     body.querySelectorAll<HTMLButtonElement>('.archive-item').forEach(control=>control.onclick=async()=>{const item=data.items.find((entry:any)=>entry.id===Number(control.dataset.id));if(!item)return;if(!await confirmAction(`Delete ${item.name}? Its transaction history will be preserved.`,'Delete inventory item'))return;try{await apiRequest(`/items/${item.id}`,{method:'DELETE'});await load();window.dispatchEvent(new CustomEvent('stockhub:mutation',{detail:{refreshCurrent:false}}));const toast=document.querySelector<HTMLElement>('#toast');const toastText=document.querySelector<HTMLElement>('#toastText');if(toast&&toastText){toastText.textContent=`Item "${item.name}" deleted`;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),3500);}}catch(error){showError(error instanceof Error?error.message:'Item could not be deleted.','Delete item failed');}});
   }catch(error){body.innerHTML=empty(error instanceof ApiError&&error.status===401?'Please sign in to view inventory.':'Inventory could not be loaded.');}};
-  root.querySelector<HTMLButtonElement>('#refreshItems')!.onclick=load;root.querySelector<HTMLButtonElement>('#addInventory')?.addEventListener('click',()=>document.querySelector<HTMLButtonElement>('#quickAdd')?.click());await load();
+  root.querySelector<HTMLButtonElement>('#refreshItems')!.onclick=load;root.querySelector<HTMLButtonElement>('#addInventory')?.addEventListener('click',()=>openAddItemModal(categories,locations,load));await load();
 }
 
 async function transactionsPaged(root:HTMLElement){
@@ -347,7 +517,7 @@ async function locationsStyled(root:HTMLElement){
         <div class="location-parent-card">
           <div class="location-parent-main">
             <div class="location-parent-identity">
-              <span class="parent-type-badge">${esc(section.locationType)}</span>
+              <span class="tier-pill-badge tier-badge-zone">📂 ZONE / AISLE</span>
               <div class="location-title-wrap">
                 <h3>${esc(section.name)}</h3>
                 <span class="location-code-tag">${esc(section.code)}</span>
@@ -399,11 +569,11 @@ async function locationsStyled(root:HTMLElement){
                     const childPct=percent(child);
                     const childTone=tone(childPct);
                     return `
-                    <article class="location-child-card ${childTone}">
+                    <article class="location-child-card tier-slot-card ${childTone}">
                       <div class="child-card-header">
                         <div class="child-branch-indicator">
                           <span class="branch-icon">↳</span>
-                          <span class="child-type-tag">${esc(child.locationType)}</span>
+                          <span class="tier-pill-badge tier-badge-slot">📍 PICK POINT</span>
                         </div>
                         <span class="child-state-dot ${childTone}" title="${toneLabel(childPct)}"></span>
                       </div>
@@ -473,7 +643,7 @@ async function locationsStyled(root:HTMLElement){
             <div class="location-parent-card facility-header">
               <div class="location-parent-main">
                 <div class="location-parent-identity">
-                  <span class="facility-type-badge">🏢 WAREHOUSE FACILITY</span>
+                  <span class="tier-pill-badge tier-badge-warehouse">🏢 FACILITY</span>
                   <div class="location-title-wrap">
                     <h3>${esc(wh.name)}</h3>
                     <span class="location-code-tag">${esc(wh.code)}</span>
@@ -529,7 +699,7 @@ async function locationsStyled(root:HTMLElement){
           <div class="location-parent-card facility-header">
             <div class="location-parent-main">
               <div class="location-parent-identity">
-                <span class="facility-type-badge">🏢 WAREHOUSE FACILITY</span>
+                <span class="tier-pill-badge tier-badge-warehouse">🏢 FACILITY</span>
                 <div class="location-title-wrap">
                   <h3>${esc(wh.name)}</h3>
                   <span class="location-code-tag">${esc(wh.code)}</span>
@@ -806,7 +976,173 @@ async function locationsStyled(root:HTMLElement){
 
 async function reports(root:HTMLElement){root.innerHTML=shell('Reports','Live inventory valuation and category breakdown.',button('refreshReports','Refresh'));const load=async()=>{const body=root.querySelector<HTMLElement>('.module-body')!;try{const [summary,categories]:any[]=await Promise.all([apiRequest('/reports/inventory-summary'),apiRequest('/reports/category-breakdown')]);body.innerHTML=`<div class="report-stats"><article><span>Total Items</span><b>${esc(summary.totalItems)}</b></article><article><span>Total Units</span><b>${esc(summary.totalUnits)}</b></article><article><span>Inventory Value</span><b>${formatPeso(summary.inventoryValue)}</b></article><article><span>Low / Out</span><b>${esc(summary.lowStockItems)} / ${esc(summary.outOfStockItems)}</b></article></div><div class="module-table-wrap"><table class="module-table"><thead><tr><th>Category</th><th>SKUs</th><th>Units</th><th>Value (PHP)</th></tr></thead><tbody>${categories.map((c:any)=>`<tr><td>${esc(c.category)}</td><td>${esc(c.skuCount)}</td><td>${esc(c.totalUnits)}</td><td>${formatPeso(c.inventoryValue)}</td></tr>`).join('')}</tbody></table></div>`;}catch{body.innerHTML=empty('Reports could not be loaded.');}};root.querySelector<HTMLButtonElement>('#refreshReports')!.onclick=load;await load();}
 
-async function settings(root:HTMLElement){root.innerHTML=shell('Settings','Account, session, and system configuration.','','<div class="module-loading">Loading account…</div>');const body=root.querySelector<HTMLElement>('.module-body')!;try{const data:any=await apiRequest('/auth/me');body.innerHTML=`<article class="settings-card"><div class="avatar">${esc(data.user.name.slice(0,2).toUpperCase())}</div><div><h3>${esc(data.user.name)}</h3><p>${esc(data.user.email)}</p><span class="pill green">${esc(data.user.role)}</span></div><button id="logoutUser" class="module-button">Sign out</button></article>`;body.querySelector<HTMLButtonElement>('#logoutUser')!.onclick=async()=>{await apiRequest('/auth/logout',{method:'POST'});location.reload();};}catch{body.innerHTML=empty('Account details could not be loaded.');}}
+async function settings(root: HTMLElement) {
+  root.innerHTML = shell('Settings', 'Account, session, and system security configuration.', '', '<div class="module-loading">Loading account…</div>');
+  const body = root.querySelector<HTMLElement>('.module-body')!;
+  try {
+    const data: any = await apiRequest('/auth/me');
+    const user = data.user;
+    const roleClass = user.role === 'ADMIN' ? 'green' : user.role === 'STAFF' ? 'orange' : 'blue';
+    const eyeSvg = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    const eyeOffSvg = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>`;
+
+    body.innerHTML = `
+      <div class="settings-shell">
+        <article class="settings-card">
+          <div class="avatar">${esc(user.name.split(/\s+/).map((part: string) => part[0]).join('').slice(0, 2).toUpperCase())}</div>
+          <div class="settings-user-info">
+            <h3>${esc(user.name)}</h3>
+            <p>${esc(user.email)}</p>
+            <span class="pill ${roleClass}">${esc(user.role)}</span>
+          </div>
+          <button id="logoutUser" class="module-button" type="button">Sign out</button>
+        </article>
+
+        <section class="settings-panel">
+          <header class="settings-panel-head">
+            <div class="settings-panel-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div>
+              <h3>Security &amp; Password</h3>
+              <p>Change your account password. Must be at least 8 characters long.</p>
+            </div>
+          </header>
+
+          <div class="settings-panel-body">
+            <form id="changePasswordForm" class="settings-form" novalidate>
+              <div class="settings-form-group">
+                <label for="currentPassword">Current Password</label>
+                <div class="settings-input-wrap">
+                  <input id="currentPassword" name="currentPassword" type="password" required autocomplete="current-password" placeholder="Enter current password">
+                  <button type="button" class="settings-toggle-pass" aria-label="Show password" data-for="currentPassword">${eyeSvg}</button>
+                </div>
+              </div>
+
+              <div class="settings-form-group">
+                <label for="newPassword">
+                  New Password
+                  <small>Min. 8 characters</small>
+                </label>
+                <div class="settings-input-wrap">
+                  <input id="newPassword" name="newPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="Enter new password">
+                  <button type="button" class="settings-toggle-pass" aria-label="Show password" data-for="newPassword">${eyeSvg}</button>
+                </div>
+              </div>
+
+              <div class="settings-form-group">
+                <label for="confirmPassword">Confirm New Password</label>
+                <div class="settings-input-wrap">
+                  <input id="confirmPassword" name="confirmPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="Re-enter new password">
+                  <button type="button" class="settings-toggle-pass" aria-label="Show password" data-for="confirmPassword">${eyeSvg}</button>
+                </div>
+              </div>
+
+              <div id="passwordMessage" class="settings-form-message" role="alert" aria-live="polite"></div>
+
+              <div class="settings-actions">
+                <button type="submit" id="savePasswordBtn" class="module-button primary">Update Password</button>
+              </div>
+            </form>
+          </div>
+        </section>
+      </div>
+    `;
+
+    body.querySelector<HTMLButtonElement>('#logoutUser')!.onclick = async () => {
+      await apiRequest('/auth/logout', { method: 'POST' });
+      location.reload();
+    };
+
+    body.querySelectorAll<HTMLButtonElement>('.settings-toggle-pass').forEach(toggleBtn => {
+      toggleBtn.onclick = () => {
+        const targetId = toggleBtn.dataset.for!;
+        const input = body.querySelector<HTMLInputElement>(`#${targetId}`)!;
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+        toggleBtn.innerHTML = isPassword ? eyeOffSvg : eyeSvg;
+        toggleBtn.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+      };
+    });
+
+    const form = body.querySelector<HTMLFormElement>('#changePasswordForm')!;
+    const messageEl = body.querySelector<HTMLElement>('#passwordMessage')!;
+    const submitBtn = body.querySelector<HTMLButtonElement>('#savePasswordBtn')!;
+
+    const showMessage = (text: string, type: 'error' | 'success') => {
+      messageEl.textContent = text;
+      messageEl.className = `settings-form-message show ${type}`;
+    };
+
+    const hideMessage = () => {
+      messageEl.textContent = '';
+      messageEl.className = 'settings-form-message';
+    };
+
+    form.onsubmit = async event => {
+      event.preventDefault();
+      hideMessage();
+
+      const currentPassword = (form.elements.namedItem('currentPassword') as HTMLInputElement).value;
+      const newPassword = (form.elements.namedItem('newPassword') as HTMLInputElement).value;
+      const confirmPassword = (form.elements.namedItem('confirmPassword') as HTMLInputElement).value;
+
+      if (!currentPassword) {
+        showMessage('Please enter your current password.', 'error');
+        return;
+      }
+      if (newPassword.length < 8) {
+        showMessage('New password must be at least 8 characters long.', 'error');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        showMessage('New password and confirmation do not match.', 'error');
+        return;
+      }
+      if (currentPassword === newPassword) {
+        showMessage('New password must be different from your current password.', 'error');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      const originalText = submitBtn.textContent;
+      submitBtn.textContent = 'Updating Password…';
+
+      try {
+        await apiRequest('/auth/change-password', {
+          method: 'POST',
+          body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
+        });
+
+        form.reset();
+        body.querySelectorAll<HTMLButtonElement>('.settings-toggle-pass').forEach(btn => {
+          const targetId = btn.dataset.for!;
+          const input = body.querySelector<HTMLInputElement>(`#${targetId}`)!;
+          input.type = 'password';
+          btn.innerHTML = eyeSvg;
+          btn.setAttribute('aria-label', 'Show password');
+        });
+
+        showMessage('Password changed successfully!', 'success');
+
+        const toast = document.querySelector<HTMLElement>('#toast');
+        const toastText = document.querySelector<HTMLElement>('#toastText');
+        if (toast && toastText) {
+          toastText.textContent = 'Password updated successfully';
+          toast.classList.add('show');
+          setTimeout(() => toast.classList.remove('show'), 3500);
+        }
+      } catch (err: any) {
+        showMessage(err instanceof Error ? err.message : 'Could not change password.', 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      }
+    };
+  } catch {
+    body.innerHTML = empty('Account details could not be loaded.');
+  }
+}
 
 async function reportsPaged(root:HTMLElement){
   const state:TableState={page:1,limit:10,total:0,search:''};let summary:any;let categories:any[]=[];root.innerHTML=shell('Reports','Live inventory valuation and category breakdown.');root.querySelector('.module-view')?.classList.add('reports-view');

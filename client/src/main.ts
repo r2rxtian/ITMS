@@ -4,6 +4,7 @@ import type { DashboardWarehouse } from './types/dashboard';
 import { ensureSession, renderModule, showLogin } from './pages/modules';
 import { apiRequest } from './services/api';
 import { isDialogOpen, showError } from './ui/dialog';
+import { buildLocationHierarchy, setupCascadingLocationChain } from './ui/cascading-location';
 
 type IconName = 'grid' | 'box' | 'activity' | 'tag' | 'pin' | 'chart' | 'settings' | 'search' | 'moon' | 'bell' | 'plus' | 'chevron' | 'wallet' | 'warning' | 'clock' | 'filter' | 'download' | 'more' | 'edit' | 'move' | 'arrow' | 'menu' | 'close' | 'logout' | 'clipboard';
 
@@ -112,385 +113,393 @@ const warehouseSvg = `
 </svg>`;
 
 const eastHubSvg = `
-<svg class="warehouse-art warehouse-art-easthub" viewBox="0 0 850 300" preserveAspectRatio="none" role="img" aria-label="East Hub Warehouse high-bay distribution aisles and shipping docks">
+<svg class="warehouse-art warehouse-art-easthub" viewBox="0 0 850 300" preserveAspectRatio="none" role="img" aria-label="East Hub Warehouse architectural interior with mezzanine catwalks, industrial glazing, and staging dock">
   <defs>
-    <linearGradient id="ehCeiling" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#2a394f"/>
-      <stop offset="65%" stop-color="#41546e"/>
-      <stop offset="100%" stop-color="#556b87"/>
+    <linearGradient id="ehWallBase" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#b68962"/>
+      <stop offset="35%" stop-color="#c99b74"/>
+      <stop offset="85%" stop-color="#b88b65"/>
+      <stop offset="100%" stop-color="#a4754f"/>
     </linearGradient>
-    <linearGradient id="ehBackWall" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#72849c"/>
-      <stop offset="100%" stop-color="#93a4b9"/>
+
+    <linearGradient id="ehTopHeader" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#73492a"/>
+      <stop offset="100%" stop-color="#8e623f"/>
     </linearGradient>
-    <linearGradient id="ehFloor" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#9caebb"/>
-      <stop offset="35%" stop-color="#6e8498"/>
-      <stop offset="70%" stop-color="#4e6479"/>
-      <stop offset="100%" stop-color="#3b4d61"/>
+
+    <linearGradient id="ehColumnGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#cca484"/>
+      <stop offset="25%" stop-color="#e9d0b9"/>
+      <stop offset="70%" stop-color="#dcbe9f"/>
+      <stop offset="100%" stop-color="#b8916f"/>
     </linearGradient>
-    <linearGradient id="ehSky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#80c8f8"/>
-      <stop offset="100%" stop-color="#cbe8fc"/>
+
+    <linearGradient id="ehBeamGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ebd5c0"/>
+      <stop offset="40%" stop-color="#dcbe9f"/>
+      <stop offset="100%" stop-color="#b8916f"/>
     </linearGradient>
-    <linearGradient id="ehBeamRed" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ef4444"/>
-      <stop offset="25%" stop-color="#dc2626"/>
-      <stop offset="100%" stop-color="#991b1b"/>
+
+    <linearGradient id="ehFloorGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8c8579"/>
+      <stop offset="15%" stop-color="#a49e92"/>
+      <stop offset="60%" stop-color="#908a7e"/>
+      <stop offset="100%" stop-color="#736d62"/>
     </linearGradient>
-    <linearGradient id="ehUprightBlue" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#3b82f6"/>
-      <stop offset="40%" stop-color="#1d4ed8"/>
-      <stop offset="100%" stop-color="#1e3a8a"/>
-    </linearGradient>
-    <linearGradient id="ehBoxWarm" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#fed7aa"/>
-      <stop offset="40%" stop-color="#fba863"/>
-      <stop offset="100%" stop-color="#d97706"/>
-    </linearGradient>
-    <linearGradient id="ehBoxTop" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffedd5"/>
-      <stop offset="100%" stop-color="#fed7aa"/>
-    </linearGradient>
-    <linearGradient id="ehBoxSide" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#c26e10"/>
-      <stop offset="100%" stop-color="#92400e"/>
-    </linearGradient>
-    <linearGradient id="ehLightRay" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.32"/>
-      <stop offset="70%" stop-color="#ffffff" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
+
     <linearGradient id="ehFloorSheen" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.16"/>
-      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.28"/>
-      <stop offset="65%" stop-color="#ffffff" stop-opacity="0.16"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="22%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="78%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.02"/>
     </linearGradient>
-    <filter id="ehGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
-      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-    </filter>
+
+    <linearGradient id="ehLampRay" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff8eb" stop-opacity="0.38"/>
+      <stop offset="60%" stop-color="#fff5e4" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ffe8cc" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="ehGlassGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5efe6"/>
+      <stop offset="100%" stop-color="#e3dacb"/>
+    </linearGradient>
+
+    <linearGradient id="ehConduitBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4e758e"/>
+      <stop offset="50%" stop-color="#3b5f77"/>
+      <stop offset="100%" stop-color="#2a4557"/>
+    </linearGradient>
+
+    <linearGradient id="ehDoorRollup" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#475569"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+
+    <pattern id="ehSlatPattern" width="16" height="300" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="0" y2="300" stroke="#996a46" stroke-width="1.2" opacity="0.45"/>
+      <line x1="1" y1="0" x2="1" y2="300" stroke="#dfbc9b" stroke-width="0.8" opacity="0.25"/>
+    </pattern>
+
+    <pattern id="ehTopSlatPattern" width="10" height="32" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="0" y2="32" stroke="#573419" stroke-width="1.2" opacity="0.55"/>
+      <line x1="1" y1="0" x2="1" y2="32" stroke="#a4734a" stroke-width="0.8" opacity="0.25"/>
+    </pattern>
   </defs>
 
-  <rect width="850" height="152" fill="url(#ehCeiling)"/>
-  <g stroke="#37485f" stroke-width="1.8" opacity="0.65">
-    <line x1="0" y1="0" x2="425" y2="135"/>
-    <line x1="140" y1="0" x2="425" y2="135"/>
-    <line x1="280" y1="0" x2="425" y2="135"/>
-    <line x1="570" y1="0" x2="425" y2="135"/>
-    <line x1="710" y1="0" x2="425" y2="135"/>
-    <line x1="850" y1="0" x2="425" y2="135"/>
-    <line x1="100" y1="32" x2="750" y2="32"/>
-    <line x1="220" y1="72" x2="630" y2="72"/>
-    <line x1="320" y1="106" x2="530" y2="106"/>
+  <!-- 1. Background Wall & Vertical Fluting -->
+  <g id="ehBgWall">
+    <rect width="850" height="236" fill="url(#ehWallBase)"/>
+    <rect width="850" height="236" fill="url(#ehSlatPattern)"/>
+    <rect x="0" y="0" width="850" height="32" fill="url(#ehTopHeader)"/>
+    <rect x="0" y="0" width="850" height="32" fill="url(#ehTopSlatPattern)"/>
+    <line x1="0" y1="32" x2="850" y2="32" stroke="#543217" stroke-width="2"/>
+    <line x1="0" y1="34" x2="850" y2="34" stroke="#d5b08e" stroke-width="1"/>
   </g>
 
-  <polygon points="170,22 135,190 280,190 240,22" fill="url(#ehLightRay)"/>
-  <polygon points="380,20 330,190 520,190 470,20" fill="url(#ehLightRay)"/>
-  <polygon points="610,22 570,190 715,190 680,22" fill="url(#ehLightRay)"/>
+  <!-- 2. Roof Trusses / Rafters (Triangle Warren Truss) -->
+  <g id="ehTrusses" stroke="#caa27e" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="58" x2="850" y2="58" stroke="#bd916b" stroke-width="6"/>
 
-  <g filter="url(#ehGlow)">
-    <rect x="155" y="19" width="90" height="6" rx="2" fill="#ffffff"/>
-    <rect x="375" y="17" width="100" height="6.5" rx="2" fill="#ffffff"/>
-    <rect x="605" y="19" width="90" height="6" rx="2" fill="#ffffff"/>
-    <rect x="270" y="68" width="55" height="4.5" rx="1.5" fill="#f0f9ff" opacity="0.9"/>
-    <rect x="525" y="68" width="55" height="4.5" rx="1.5" fill="#f0f9ff" opacity="0.9"/>
+    <!-- Left Bay Rafters -->
+    <line x1="0" y1="32" x2="48" y2="58"/>
+    <line x1="48" y1="58" x2="98" y2="32"/>
+    <line x1="48" y1="32" x2="48" y2="58"/>
+    <line x1="98" y1="32" x2="98" y2="58"/>
+    <line x1="98" y1="32" x2="146" y2="58"/>
+
+    <!-- Center Bay Rafters -->
+    <line x1="192" y1="58" x2="258" y2="32"/>
+    <line x1="258" y1="32" x2="325" y2="58"/>
+    <line x1="258" y1="32" x2="258" y2="58"/>
+    <line x1="325" y1="58" x2="391" y2="32"/>
+    <line x1="325" y1="32" x2="325" y2="58"/>
+    <line x1="391" y1="32" x2="458" y2="58"/>
+    <line x1="391" y1="32" x2="391" y2="58"/>
+    <line x1="458" y1="58" x2="525" y2="32"/>
+    <line x1="458" y1="32" x2="458" y2="58"/>
+    <line x1="525" y1="32" x2="591" y2="58"/>
+    <line x1="525" y1="32" x2="525" y2="58"/>
+    <line x1="591" y1="58" x2="658" y2="32"/>
+    <line x1="591" y1="32" x2="591" y2="58"/>
+
+    <!-- Right Bay Rafters -->
+    <line x1="704" y1="32" x2="752" y2="58"/>
+    <line x1="752" y1="58" x2="802" y2="32"/>
+    <line x1="752" y1="32" x2="752" y2="58"/>
+    <line x1="802" y1="32" x2="802" y2="58"/>
+    <line x1="802" y1="32" x2="850" y2="58"/>
   </g>
 
-  <rect x="310" y="106" width="230" height="84" fill="url(#ehBackWall)"/>
-  <g stroke="#61748d" stroke-width="1" opacity="0.55">
-    <line x1="310" y1="106" x2="310" y2="190"/>
-    <line x1="345" y1="106" x2="345" y2="190"/>
-    <line x1="505" y1="106" x2="505" y2="190"/>
-    <line x1="540" y1="106" x2="540" y2="190"/>
-  </g>
-
-  <rect x="344" y="117" width="162" height="73" rx="2" fill="#1e293b"/>
-  <g>
-    <rect x="344" y="117" width="162" height="7" fill="#f59e0b"/>
-    <path d="M348 117l7 7h5l-7-7z M366 117l7 7h5l-7-7z M384 117l7 7h5l-7-7z M402 117l7 7h5l-7-7z M420 117l7 7h5l-7-7z M438 117l7 7h5l-7-7z M456 117l7 7h5l-7-7z M474 117l7 7h5l-7-7z M492 117l7 7h5l-7-7z" fill="#1e293b"/>
-    <rect x="344" y="124" width="4" height="66" fill="#475569"/>
-    <rect x="502" y="124" width="4" height="66" fill="#475569"/>
-  </g>
-
-  <g>
-    <rect x="348" y="124" width="154" height="66" fill="url(#ehSky)"/>
-    <path d="M348 162h154v28H348z" fill="#93c5fd" opacity="0.6"/>
-    <path d="M352 162v-16h8v16 M364 162v-21h12v21 M380 162v-10h14v10 M448 162v-24h10v24 M462 162v-14h16v14 M482 162v-18h8v18" fill="#60a5fa" opacity="0.75"/>
-    <path d="M430 136h28l-8 26h-4l6-22h-18l-4 22h-3z" fill="#3b82f6" opacity="0.6"/>
-
-    <rect x="354" y="166" width="34" height="15" rx="0.5" fill="#0284c7"/>
-    <line x1="362" y1="166" x2="362" y2="181" stroke="#0369a1" stroke-width="0.8"/>
-    <line x1="371" y1="166" x2="371" y2="181" stroke="#0369a1" stroke-width="0.8"/>
-    <line x1="380" y1="166" x2="380" y2="181" stroke="#0369a1" stroke-width="0.8"/>
-    <rect x="356" y="152" width="30" height="14" rx="0.5" fill="#ea580c"/>
-    <line x1="366" y1="152" x2="366" y2="166" stroke="#c2410c" stroke-width="0.8"/>
-    <line x1="376" y1="152" x2="376" y2="166" stroke="#c2410c" stroke-width="0.8"/>
-    <rect x="394" y="161" width="38" height="20" rx="0.5" fill="#0f766e"/>
-    <line x1="403" y1="161" x2="403" y2="181" stroke="#115e59" stroke-width="0.8"/>
-    <line x1="413" y1="161" x2="413" y2="181" stroke="#115e59" stroke-width="0.8"/>
-    <line x1="423" y1="161" x2="423" y2="181" stroke="#115e59" stroke-width="0.8"/>
-    <rect x="444" y="168" width="34" height="14" rx="0.5" fill="#d97706"/>
-    <line x1="455" y1="168" x2="455" y2="182" stroke="#b45309" stroke-width="0.8"/>
-    <line x1="467" y1="168" x2="467" y2="182" stroke="#b45309" stroke-width="0.8"/>
-    <rect x="348" y="181" width="154" height="9" fill="#64748b"/>
-  </g>
-
-  <polygon points="0,188 850,188 850,300 0,300" fill="url(#ehFloor)"/>
-  <polygon points="310,188 540,188 640,300 210,300" fill="url(#ehFloorSheen)"/>
-
-  <g stroke="#f59e0b" stroke-width="2.5" opacity="0.95" stroke-dasharray="8 6">
-    <line x1="358" y1="190" x2="90" y2="300"/>
-    <line x1="492" y1="190" x2="760" y2="300"/>
-  </g>
-  <line x1="425" y1="192" x2="425" y2="300" stroke="#fcd34d" stroke-width="1.2" opacity="0.45" stroke-dasharray="5 5"/>
-
-  <g id="leftRackStructure">
-    <rect x="295" y="86" width="13" height="106" rx="1" fill="url(#ehUprightBlue)"/>
-    <rect x="195" y="48" width="19" height="152" rx="1.5" fill="url(#ehUprightBlue)"/>
-    <rect x="0" y="0" width="34" height="268" rx="2" fill="url(#ehUprightBlue)"/>
-
-    <g fill="#0f172a" opacity="0.5">
-      <rect x="14" y="25" width="6" height="3" rx="1"/>
-      <rect x="14" y="45" width="6" height="3" rx="1"/>
-      <rect x="14" y="65" width="6" height="3" rx="1"/>
-      <rect x="14" y="85" width="6" height="3" rx="1"/>
-      <rect x="14" y="105" width="6" height="3" rx="1"/>
-      <rect x="14" y="125" width="6" height="3" rx="1"/>
-      <rect x="14" y="145" width="6" height="3" rx="1"/>
-      <rect x="14" y="165" width="6" height="3" rx="1"/>
-      <rect x="14" y="185" width="6" height="3" rx="1"/>
-      <rect x="14" y="205" width="6" height="3" rx="1"/>
-      <rect x="14" y="225" width="6" height="3" rx="1"/>
-      <rect x="202" y="65" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="202" y="82" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="202" y="99" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="202" y="116" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="202" y="133" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="202" y="150" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="202" y="167" width="4.5" height="2.5" rx="0.8"/>
+  <!-- 3. Upper & Mid Windows -->
+  <g id="ehWindows">
+    <!-- Center Ribbon Window -->
+    <rect x="260" y="104" width="330" height="34" rx="2" fill="#d9cebd" stroke="#b19f87" stroke-width="2"/>
+    <rect x="263" y="107" width="324" height="28" fill="url(#ehGlassGrad)"/>
+    <g stroke="#ffffff" stroke-width="1.5" opacity="0.88">
+      <line x1="263" y1="121" x2="587" y2="121"/>
+      <line x1="303" y1="107" x2="303" y2="135"/>
+      <line x1="344" y1="107" x2="344" y2="135"/>
+      <line x1="385" y1="107" x2="385" y2="135"/>
+      <line x1="425" y1="107" x2="425" y2="135"/>
+      <line x1="465" y1="107" x2="465" y2="135"/>
+      <line x1="506" y1="107" x2="506" y2="135"/>
+      <line x1="547" y1="107" x2="547" y2="135"/>
+    </g>
+    <g fill="#ffffff" opacity="0.32">
+      <polygon points="285,107 305,107 277,135 264,135"/>
+      <polygon points="365,107 400,107 365,135 330,135"/>
+      <polygon points="465,107 500,107 465,135 430,135"/>
+      <polygon points="550,107 585,107 555,135 520,135"/>
     </g>
 
-    <g stroke="#2563eb" stroke-width="2.5" opacity="0.6">
-      <line x1="34" y1="52" x2="195" y2="110"/>
-      <line x1="34" y1="110" x2="195" y2="52"/>
-      <line x1="34" y1="124" x2="195" y2="178"/>
-      <line x1="34" y1="178" x2="195" y2="124"/>
-      <line x1="214" y1="78" x2="295" y2="128"/>
-      <line x1="214" y1="128" x2="295" y2="78"/>
+    <!-- Left Bay Window -->
+    <rect x="0" y="106" width="95" height="32" rx="2" fill="#d9cebd" stroke="#b19f87" stroke-width="2"/>
+    <rect x="0" y="108" width="92" height="28" fill="url(#ehGlassGrad)"/>
+    <g stroke="#ffffff" stroke-width="1.5" opacity="0.88">
+      <line x1="0" y1="122" x2="92" y2="122"/>
+      <line x1="30" y1="108" x2="30" y2="136"/>
+      <line x1="62" y1="108" x2="62" y2="136"/>
     </g>
+    <polygon points="25,108 50,108 22,136 0,136" fill="#ffffff" opacity="0.32"/>
+    <polygon points="75,108 92,108 64,136 47,136" fill="#ffffff" opacity="0.32"/>
 
-    <polygon points="0,52 308,110 308,119 0,63" fill="url(#ehBeamRed)"/>
-    <line x1="0" y1="53" x2="308" y2="111" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
-    <polygon points="0,126 308,145 308,154 0,137" fill="url(#ehBeamRed)"/>
-    <line x1="0" y1="127" x2="308" y2="146" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
-    <polygon points="0,202 308,179 308,188 0,213" fill="url(#ehBeamRed)"/>
-    <line x1="0" y1="203" x2="308" y2="180" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
+    <!-- Right Bay Window -->
+    <rect x="755" y="106" width="95" height="32" rx="2" fill="#d9cebd" stroke="#b19f87" stroke-width="2"/>
+    <rect x="758" y="108" width="92" height="28" fill="url(#ehGlassGrad)"/>
+    <g stroke="#ffffff" stroke-width="1.5" opacity="0.88">
+      <line x1="758" y1="122" x2="850" y2="122"/>
+      <line x1="788" y1="108" x2="788" y2="136"/>
+      <line x1="820" y1="108" x2="820" y2="136"/>
+    </g>
+    <polygon points="785,108 810,108 782,136 758,136" fill="#ffffff" opacity="0.32"/>
+    <polygon points="835,108 850,108 832,136 817,136" fill="#ffffff" opacity="0.32"/>
 
-    <rect x="2" y="48" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
-    <rect x="2" y="122" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
-    <rect x="2" y="198" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
-    <rect x="194" y="74" width="20" height="12" rx="1" fill="#b91c1c"/>
-    <rect x="194" y="128" width="20" height="12" rx="1" fill="#b91c1c"/>
-    <rect x="194" y="171" width="20" height="12" rx="1" fill="#b91c1c"/>
-  </g>
+    <!-- Lower Louver Accent Windows -->
+    <g opacity="0.92">
+      <rect x="0" y="195" width="80" height="15" rx="1.5" fill="#d9cebd" stroke="#b19f87" stroke-width="1.5"/>
+      <rect x="0" y="197" width="77" height="11" fill="url(#ehGlassGrad)"/>
+      <line x1="0" y1="202" x2="77" y2="202" stroke="#ffffff" stroke-width="1.2"/>
+      <line x1="26" y1="197" x2="26" y2="208" stroke="#ffffff" stroke-width="1.2"/>
+      <line x1="52" y1="197" x2="52" y2="208" stroke="#ffffff" stroke-width="1.2"/>
+      <polygon points="20,197 34,197 23,208 9,208" fill="#ffffff" opacity="0.38"/>
 
-  <g id="leftCartons">
-    <g transform="translate(36, 12)">
-      <rect x="0" y="0" width="62" height="39" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="62" height="6" fill="url(#ehBoxTop)"/>
-      <line x1="31" y1="6" x2="31" y2="39" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
-      <rect x="8" y="12" width="16" height="10" rx="1" fill="#ffffff" opacity="0.9"/>
-      <line x1="11" y1="15" x2="21" y2="15" stroke="#1e293b" stroke-width="1"/>
-      <line x1="11" y1="18" x2="19" y2="18" stroke="#1e293b" stroke-width="1"/>
-    </g>
-    <g transform="translate(104, 18)">
-      <rect x="0" y="0" width="54" height="36" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="54" height="5" fill="url(#ehBoxTop)"/>
-      <line x1="27" y1="5" x2="27" y2="36" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
-      <rect x="6" y="10" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-    <g transform="translate(220, 72)">
-      <rect x="0" y="0" width="34" height="27" rx="1.5" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="34" height="4" fill="url(#ehBoxTop)"/>
-      <rect x="38" y="4" width="32" height="23" rx="1.5" fill="url(#ehBoxWarm)"/>
-    </g>
-
-    <g transform="translate(36, 78)">
-      <rect x="0" y="0" width="70" height="47" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="70" height="7" fill="url(#ehBoxTop)"/>
-      <line x1="35" y1="7" x2="35" y2="47" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
-      <rect x="10" y="14" width="18" height="12" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-    <g transform="translate(112, 85)">
-      <rect x="0" y="0" width="46" height="42" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="46" height="6" fill="url(#ehBoxTop)"/>
-      <rect x="8" y="12" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-    <g transform="translate(220, 116)">
-      <rect x="0" y="0" width="36" height="27" rx="1.5" fill="url(#ehBoxWarm)"/>
-      <rect x="40" y="120" width="30" height="23" rx="1.5" fill="url(#ehBoxWarm)"/>
-    </g>
-
-    <g transform="translate(36, 194)">
-      <rect x="0" y="6" width="76" height="4" fill="#78350f"/>
-      <rect x="4" y="0" width="8" height="6" fill="#92400e"/>
-      <rect x="34" y="0" width="8" height="6" fill="#92400e"/>
-      <rect x="64" y="0" width="8" height="6" fill="#92400e"/>
-      <rect x="2" y="-45" width="72" height="45" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="2" y="-45" width="72" height="6" fill="url(#ehBoxTop)"/>
-      <line x1="38" y1="-39" x2="38" y2="0" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
-      <rect x="10" y="-32" width="20" height="12" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-    <g transform="translate(118, 178)">
-      <rect x="0" y="6" width="56" height="4" fill="#78350f"/>
-      <rect x="2" y="-36" width="52" height="36" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="2" y="-36" width="52" height="5" fill="url(#ehBoxTop)"/>
+      <rect x="765" y="195" width="85" height="15" rx="1.5" fill="#d9cebd" stroke="#b19f87" stroke-width="1.5"/>
+      <rect x="768" y="197" width="82" height="11" fill="url(#ehGlassGrad)"/>
+      <line x1="768" y1="202" x2="850" y2="202" stroke="#ffffff" stroke-width="1.2"/>
+      <line x1="795" y1="197" x2="795" y2="208" stroke="#ffffff" stroke-width="1.2"/>
+      <line x1="822" y1="197" x2="822" y2="208" stroke="#ffffff" stroke-width="1.2"/>
+      <polygon points="785,197 799,197 788,208 774,208" fill="#ffffff" opacity="0.38"/>
     </g>
   </g>
 
-  <g id="rightRackStructure">
-    <rect x="542" y="86" width="13" height="106" rx="1" fill="url(#ehUprightBlue)"/>
-    <rect x="636" y="48" width="19" height="152" rx="1.5" fill="url(#ehUprightBlue)"/>
-    <rect x="816" y="0" width="34" height="268" rx="2" fill="url(#ehUprightBlue)"/>
+  <!-- 4. Industrial Utility Conduits & Control Terminal -->
+  <g id="ehConduits">
+    <rect x="0" y="172" width="850" height="9" fill="#2d495e" stroke="#1c3140" stroke-width="1"/>
+    <line x1="0" y1="173" x2="850" y2="173" stroke="#507c9b" stroke-width="1"/>
 
-    <g fill="#0f172a" opacity="0.5">
-      <rect x="830" y="25" width="6" height="3" rx="1"/>
-      <rect x="830" y="45" width="6" height="3" rx="1"/>
-      <rect x="830" y="65" width="6" height="3" rx="1"/>
-      <rect x="830" y="85" width="6" height="3" rx="1"/>
-      <rect x="830" y="105" width="6" height="3" rx="1"/>
-      <rect x="830" y="125" width="6" height="3" rx="1"/>
-      <rect x="830" y="145" width="6" height="3" rx="1"/>
-      <rect x="830" y="165" width="6" height="3" rx="1"/>
-      <rect x="830" y="185" width="6" height="3" rx="1"/>
-      <rect x="830" y="205" width="6" height="3" rx="1"/>
-      <rect x="643" y="65" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="643" y="82" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="643" y="99" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="643" y="116" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="643" y="133" width="4.5" height="2.5" rx="0.8"/>
-      <rect x="643" y="150" width="4.5" height="2.5" rx="0.8"/>
-    </g>
+    <!-- Central Terminal Console / Distribution Junction Box -->
+    <rect x="365" y="192" width="120" height="16" rx="2" fill="url(#ehConduitBlue)" stroke="#22394a" stroke-width="1.5"/>
+    <rect x="370" y="195" width="110" height="10" rx="1" fill="#2d4a5e"/>
+    <circle cx="378" cy="200" r="1.8" fill="#4ade80"/>
+    <circle cx="386" cy="200" r="1.8" fill="#38bdf8"/>
+    <circle cx="394" cy="200" r="1.8" fill="#facc15"/>
+    <line x1="410" y1="198" x2="472" y2="198" stroke="#486f8a" stroke-width="1.2"/>
+    <line x1="410" y1="202" x2="465" y2="202" stroke="#486f8a" stroke-width="1.2"/>
 
-    <g stroke="#2563eb" stroke-width="2.5" opacity="0.6">
-      <line x1="816" y1="52" x2="655" y2="110"/>
-      <line x1="816" y1="110" x2="655" y2="52"/>
-      <line x1="816" y1="124" x2="655" y2="178"/>
-      <line x1="816" y1="178" x2="655" y2="124"/>
-      <line x1="636" y1="78" x2="555" y2="128"/>
-      <line x1="636" y1="128" x2="555" y2="78"/>
+    <!-- Dual Conduit Pipe Routing -->
+    <g stroke="url(#ehConduitBlue)" stroke-width="4.5" fill="none" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M365 196 H236 V252 H24"/>
+      <path d="M365 204 H246 V244 H38"/>
+      <path d="M485 196 H614 V252 H826"/>
+      <path d="M485 204 H604 V244 H812"/>
     </g>
-
-    <polygon points="542,110 850,52 850,63 542,119" fill="url(#ehBeamRed)"/>
-    <line x1="542" y1="111" x2="850" y2="53" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
-    <polygon points="542,145 850,126 850,137 542,154" fill="url(#ehBeamRed)"/>
-    <line x1="542" y1="146" x2="850" y2="127" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
-    <polygon points="542,179 850,202 850,213 542,188" fill="url(#ehBeamRed)"/>
-    <line x1="542" y1="180" x2="850" y2="203" stroke="#fca5a5" stroke-width="1.2" opacity="0.8"/>
-
-    <rect x="818" y="48" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
-    <rect x="818" y="122" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
-    <rect x="818" y="198" width="30" height="17" rx="1.5" fill="#b91c1c" stroke="#f87171" stroke-width="0.8"/>
-    <rect x="636" y="74" width="20" height="12" rx="1" fill="#b91c1c"/>
-    <rect x="636" y="128" width="20" height="12" rx="1" fill="#b91c1c"/>
-    <rect x="636" y="171" width="20" height="12" rx="1" fill="#b91c1c"/>
-  </g>
-
-  <g id="rightCartons">
-    <g transform="translate(660, 18)">
-      <rect x="0" y="0" width="56" height="37" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="56" height="5.5" fill="url(#ehBoxTop)"/>
-      <line x1="28" y1="5.5" x2="28" y2="37" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
-      <rect x="34" y="10" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-    <g transform="translate(730, 12)">
-      <rect x="0" y="0" width="68" height="42" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="68" height="6.5" fill="url(#ehBoxTop)"/>
-      <line x1="34" y1="6.5" x2="34" y2="42" stroke="#b45309" stroke-width="1.2" opacity="0.45"/>
-      <rect x="42" y="12" width="16" height="10" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-    <g transform="translate(560, 74)">
-      <rect x="0" y="0" width="34" height="26" rx="1.5" fill="url(#ehBoxWarm)"/>
-      <rect x="38" y="2" width="32" height="24" rx="1.5" fill="url(#ehBoxWarm)"/>
-    </g>
-
-    <g transform="translate(660, 85)">
-      <rect x="0" y="0" width="46" height="43" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="46" height="6" fill="url(#ehBoxTop)"/>
-      <rect x="24" y="12" width="14" height="9" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-    <g transform="translate(720, 78)">
-      <rect x="0" y="0" width="76" height="48" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="0" y="0" width="76" height="7" fill="url(#ehBoxTop)"/>
-      <line x1="38" y1="7" x2="38" y2="48" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
-      <rect x="46" y="14" width="18" height="12" rx="1" fill="#ffffff" opacity="0.9"/>
-    </g>
-
-    <g transform="translate(660, 178)">
-      <rect x="0" y="6" width="60" height="4" fill="#78350f"/>
-      <rect x="2" y="-38" width="56" height="38" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="2" y="-38" width="56" height="5" fill="url(#ehBoxTop)"/>
-    </g>
-    <g transform="translate(730, 194)">
-      <rect x="0" y="6" width="76" height="4" fill="#78350f"/>
-      <rect x="2" y="-46" width="72" height="46" rx="2" fill="url(#ehBoxWarm)"/>
-      <rect x="2" y="-46" width="72" height="6" fill="url(#ehBoxTop)"/>
-      <line x1="38" y1="-40" x2="38" y2="0" stroke="#b45309" stroke-width="1.5" opacity="0.45"/>
+    <g stroke="#1d3140" stroke-width="1" fill="none" stroke-linejoin="round">
+      <path d="M365 196 H236 V252 H24"/>
+      <path d="M365 204 H246 V244 H38"/>
+      <path d="M485 196 H614 V252 H826"/>
+      <path d="M485 204 H604 V244 H812"/>
     </g>
   </g>
 
-  <g transform="translate(460, 184)">
-    <rect x="0" y="52" width="112" height="5" rx="1" fill="#78350f"/>
-    <rect x="6" y="47" width="10" height="5" fill="#92400e"/>
-    <rect x="50" y="47" width="10" height="5" fill="#92400e"/>
-    <rect x="96" y="47" width="10" height="5" fill="#92400e"/>
-    <polygon points="0,18 90,8 112,14 20,24" fill="url(#ehBoxTop)"/>
-    <polygon points="0,18 20,24 20,48 0,42" fill="url(#ehBoxSide)"/>
-    <polygon points="20,24 112,14 112,38 20,48" fill="url(#ehBoxWarm)"/>
-    <g transform="translate(24, -14)">
-      <polygon points="0,12 68,6 84,10 16,16" fill="url(#ehBoxTop)"/>
-      <polygon points="0,12 16,16 16,34 0,30" fill="url(#ehBoxSide)"/>
-      <polygon points="16,16 84,10 84,28 16,34" fill="url(#ehBoxWarm)"/>
-      <rect x="34" y="19" width="14" height="8" rx="0.5" fill="#ffffff" opacity="0.95"/>
-      <line x1="37" y1="22" x2="45" y2="22" stroke="#0f172a" stroke-width="0.8"/>
-      <line x1="37" y1="24" x2="43" y2="24" stroke="#0f172a" stroke-width="0.8"/>
+  <!-- 5. Volumetric Lighting & Pendant Lamps -->
+  <g id="ehLighting">
+    <polygon points="340,74 250,146 600,146 510,74" fill="url(#ehLampRay)"/>
+    <polygon points="0,74 -25,146 160,146 90,74" fill="url(#ehLampRay)"/>
+    <polygon points="760,74 690,146 875,146 850,74" fill="url(#ehLampRay)"/>
+
+    <!-- Center Pendant Fixture -->
+    <line x1="375" y1="32" x2="375" y2="68" stroke="#33241b" stroke-width="1.5"/>
+    <line x1="475" y1="32" x2="475" y2="68" stroke="#33241b" stroke-width="1.5"/>
+    <polygon points="340,74 510,74 496,68 354,68" fill="#443226" stroke="#2c1e16" stroke-width="1"/>
+    <rect x="348" y="73" width="154" height="2.5" fill="#fff9ed"/>
+
+    <!-- Left Pendant Fixture -->
+    <line x1="30" y1="32" x2="30" y2="68" stroke="#33241b" stroke-width="1.5"/>
+    <polygon points="0,74 90,74 80,68 0,68" fill="#443226" stroke="#2c1e16" stroke-width="1"/>
+    <rect x="0" y="73" width="84" height="2.5" fill="#fff9ed"/>
+
+    <!-- Right Pendant Fixture -->
+    <line x1="820" y1="32" x2="820" y2="68" stroke="#33241b" stroke-width="1.5"/>
+    <polygon points="760,74 850,74 850,68 770,68" fill="#443226" stroke="#2c1e16" stroke-width="1"/>
+    <rect x="766" y="73" width="84" height="2.5" fill="#fff9ed"/>
+  </g>
+
+  <!-- 6. Upper Catwalk Mezzanine -->
+  <g id="ehUpperCatwalk">
+    <rect x="0" y="86" width="850" height="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="0" y1="78" x2="850" y2="78" stroke="#335066" stroke-width="2.5"/>
+    <line x1="0" y1="82" x2="850" y2="82" stroke="#335066" stroke-width="2.5"/>
+    <g stroke="#f8fafc" stroke-width="2.8" stroke-linecap="square">
+      <line x1="12" y1="76" x2="12" y2="86"/>
+      <line x1="68" y1="76" x2="68" y2="86"/>
+      <line x1="124" y1="76" x2="124" y2="86"/>
+      <line x1="210" y1="76" x2="210" y2="86"/>
+      <line x1="266" y1="76" x2="266" y2="86"/>
+      <line x1="322" y1="76" x2="322" y2="86"/>
+      <line x1="378" y1="76" x2="378" y2="86"/>
+      <line x1="434" y1="76" x2="434" y2="86"/>
+      <line x1="490" y1="76" x2="490" y2="86"/>
+      <line x1="546" y1="76" x2="546" y2="86"/>
+      <line x1="602" y1="76" x2="602" y2="86"/>
+      <line x1="640" y1="76" x2="640" y2="86"/>
+      <line x1="726" y1="76" x2="726" y2="86"/>
+      <line x1="782" y1="76" x2="782" y2="86"/>
+      <line x1="838" y1="76" x2="838" y2="86"/>
     </g>
   </g>
 
-  <g transform="translate(230, 206)">
-    <polygon points="0,8 48,2 60,6 12,12" fill="url(#ehBoxTop)"/>
-    <polygon points="0,8 12,12 12,32 0,28" fill="url(#ehBoxSide)"/>
-    <polygon points="12,12 60,6 60,26 12,32" fill="url(#ehBoxWarm)"/>
-    <rect x="22" y="17" width="12" height="7" rx="0.5" fill="#ffffff" opacity="0.95"/>
-    <line x1="24" y1="20" x2="31" y2="20" stroke="#0f172a" stroke-width="0.8"/>
-    <g transform="translate(10, -18)">
-      <polygon points="0,6 30,2 38,5 8,9" fill="url(#ehBoxTop)"/>
-      <polygon points="0,6 8,9 8,24 0,21" fill="url(#ehBoxSide)"/>
-      <polygon points="8,9 38,5 38,20 8,24" fill="url(#ehBoxWarm)"/>
+  <!-- 7. Main Lower Catwalk Mezzanine -->
+  <g id="ehLowerCatwalk">
+    <rect x="0" y="150" width="850" height="9" fill="url(#ehBeamGrad)" stroke="#9a7c61" stroke-width="1.2"/>
+    <rect x="0" y="146" width="850" height="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="0" y1="138" x2="850" y2="138" stroke="#335066" stroke-width="2.5"/>
+    <line x1="0" y1="142" x2="850" y2="142" stroke="#335066" stroke-width="2.5"/>
+    <g stroke="#f8fafc" stroke-width="2.8" stroke-linecap="square">
+      <line x1="12" y1="136" x2="12" y2="147"/>
+      <line x1="68" y1="136" x2="68" y2="147"/>
+      <line x1="124" y1="136" x2="124" y2="147"/>
+      <line x1="210" y1="136" x2="210" y2="147"/>
+      <line x1="266" y1="136" x2="266" y2="147"/>
+      <line x1="322" y1="136" x2="322" y2="147"/>
+      <line x1="378" y1="136" x2="378" y2="147"/>
+      <line x1="434" y1="136" x2="434" y2="147"/>
+      <line x1="490" y1="136" x2="490" y2="147"/>
+      <line x1="546" y1="136" x2="546" y2="147"/>
+      <line x1="602" y1="136" x2="602" y2="147"/>
+      <line x1="640" y1="136" x2="640" y2="147"/>
+      <line x1="726" y1="136" x2="726" y2="147"/>
+      <line x1="782" y1="136" x2="782" y2="147"/>
+      <line x1="838" y1="136" x2="838" y2="147"/>
     </g>
   </g>
 
-  <g transform="translate(-10, 252)">
-    <polygon points="0,14 110,4 140,11 25,22" fill="#d97706"/>
-    <polygon points="0,14 25,22 25,58 0,50" fill="#92400e"/>
-    <polygon points="25,22 140,11 140,47 25,58" fill="#b45309"/>
-    <line x1="12" y1="18" x2="125" y2="7" stroke="#78350f" stroke-width="5" opacity="0.6"/>
+  <!-- 8. Major Architectural Vertical Columns -->
+  <g id="ehColumns">
+    <!-- Left Pillar (x=146 to 192) -->
+    <rect x="146" y="32" width="46" height="206" fill="url(#ehColumnGrad)"/>
+    <line x1="146" y1="32" x2="146" y2="238" stroke="#9e7756" stroke-width="1.5"/>
+    <line x1="192" y1="32" x2="192" y2="238" stroke="#855f40" stroke-width="2"/>
+    <line x1="156" y1="32" x2="156" y2="238" stroke="#ffffff" stroke-width="1" opacity="0.35"/>
+    <rect x="142" y="85" width="54" height="8" rx="1.5" fill="#ab8768" stroke="#7e5d42" stroke-width="1"/>
+    <rect x="142" y="145" width="54" height="14" rx="1.5" fill="#ab8768" stroke="#7e5d42" stroke-width="1"/>
+    <rect x="140" y="230" width="58" height="8" rx="2" fill="#75563c"/>
+
+    <!-- Right Pillar (x=658 to 704) -->
+    <rect x="658" y="32" width="46" height="206" fill="url(#ehColumnGrad)"/>
+    <line x1="658" y1="32" x2="658" y2="238" stroke="#9e7756" stroke-width="1.5"/>
+    <line x1="704" y1="32" x2="704" y2="238" stroke="#855f40" stroke-width="2"/>
+    <line x1="668" y1="32" x2="668" y2="238" stroke="#ffffff" stroke-width="1" opacity="0.35"/>
+    <rect x="654" y="85" width="54" height="8" rx="1.5" fill="#ab8768" stroke="#7e5d42" stroke-width="1"/>
+    <rect x="654" y="145" width="54" height="14" rx="1.5" fill="#ab8768" stroke="#7e5d42" stroke-width="1"/>
+    <rect x="652" y="230" width="58" height="8" rx="2" fill="#75563c"/>
   </g>
 
-  <g transform="translate(730, 235)">
-    <polygon points="0,18 80,6 120,12 36,26" fill="#f59e0b"/>
-    <polygon points="0,18 36,26 36,65 0,56" fill="#92400e"/>
-    <polygon points="36,26 120,12 120,52 36,65" fill="#b45309"/>
-    <line x1="18" y1="22" x2="100" y2="9" stroke="#78350f" stroke-width="5" opacity="0.6"/>
-    <rect x="48" y="34" width="22" height="14" rx="1" fill="#ffffff" opacity="0.9"/>
-    <line x1="52" y1="38" x2="66" y2="38" stroke="#1e293b" stroke-width="1.2"/>
-    <line x1="52" y1="42" x2="62" y2="42" stroke="#1e293b" stroke-width="1.2"/>
+  <!-- 9. Ground Floor, Access Dock Door & Safety Lines -->
+  <g id="ehFloor">
+    <rect x="0" y="226" width="850" height="12" fill="#9e7552" stroke="#785334" stroke-width="1"/>
+    <rect x="0" y="238" width="850" height="62" fill="url(#ehFloorGrad)"/>
+    <rect x="0" y="238" width="850" height="62" fill="url(#ehFloorSheen)"/>
+
+    <!-- Safety Yellow Perimeter Line -->
+    <line x1="0" y1="240" x2="850" y2="240" stroke="#fbbf24" stroke-width="3" opacity="0.9"/>
+    <!-- Center Staging Boundary Box -->
+    <rect x="290" y="248" width="270" height="52" fill="none" stroke="#fbbf24" stroke-width="2.5" stroke-dasharray="10 8" opacity="0.85"/>
+
+    <!-- Center Loading Bay Shutter Door -->
+    <g id="ehBayDoor">
+      <rect x="360" y="180" width="130" height="58" rx="2" fill="url(#ehDoorRollup)" stroke="#1e293b" stroke-width="2"/>
+      <line x1="360" y1="187" x2="490" y2="187" stroke="#64748b" stroke-width="1"/>
+      <line x1="360" y1="194" x2="490" y2="194" stroke="#64748b" stroke-width="1"/>
+      <line x1="360" y1="201" x2="490" y2="201" stroke="#64748b" stroke-width="1"/>
+      <line x1="360" y1="208" x2="490" y2="208" stroke="#64748b" stroke-width="1"/>
+      <line x1="360" y1="215" x2="490" y2="215" stroke="#64748b" stroke-width="1"/>
+      <line x1="360" y1="222" x2="490" y2="222" stroke="#64748b" stroke-width="1"/>
+      <line x1="360" y1="229" x2="490" y2="229" stroke="#64748b" stroke-width="1"/>
+      <!-- Hazard Header -->
+      <rect x="358" y="177" width="134" height="4" fill="#f59e0b"/>
+      <path d="M362 177l4 4h4l-4-4z M374 177l4 4h4l-4-4z M386 177l4 4h4l-4-4z M398 177l4 4h4l-4-4z M410 177l4 4h4l-4-4z M422 177l4 4h4l-4-4z M434 177l4 4h4l-4-4z M446 177l4 4h4l-4-4z M458 177l4 4h4l-4-4z M470 177l4 4h4l-4-4z M482 177l4 4h4l-4-4z" fill="#0f172a"/>
+      <!-- Bay Number Sign -->
+      <rect x="410" y="166" width="30" height="10" rx="2" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+      <text x="425" y="174" font-family="system-ui, sans-serif" font-size="7" font-weight="700" fill="#38bdf8" text-anchor="middle">BAY 02</text>
+    </g>
   </g>
 
-  <rect width="850" height="300" fill="url(#ehFloorSheen)" opacity="0.2" pointer-events="none"/>
+  <!-- 10. Staged Pallets, Freight & Electric Pallet Truck -->
+  <g id="ehCargo">
+    <!-- Left Staging Area -->
+    <g id="leftCargo" transform="translate(48, 235)">
+      <rect x="0" y="34" width="74" height="4" fill="#854d0e"/>
+      <rect x="3" y="38" width="10" height="5" fill="#713f12"/>
+      <rect x="32" y="38" width="10" height="5" fill="#713f12"/>
+      <rect x="61" y="38" width="10" height="5" fill="#713f12"/>
+      <rect x="0" y="43" width="74" height="3" fill="#854d0e"/>
+      <rect x="4" y="12" width="66" height="22" rx="1.5" fill="#dfad78" stroke="#b5824e" stroke-width="1"/>
+      <line x1="37" y1="12" x2="37" y2="34" stroke="#9a6939" stroke-width="1"/>
+      <line x1="4" y1="20" x2="70" y2="20" stroke="#fcd34d" stroke-width="2.5" opacity="0.8"/>
+      <rect x="12" y="16" width="14" height="10" rx="0.5" fill="#ffffff"/>
+      <line x1="14" y1="19" x2="23" y2="19" stroke="#1e293b" stroke-width="0.8"/>
+      <line x1="14" y1="22" x2="21" y2="22" stroke="#1e293b" stroke-width="0.8"/>
+      <rect x="16" y="-3" width="42" height="15" rx="1.5" fill="#cca06c" stroke="#a47543" stroke-width="1"/>
+      <line x1="16" y1="4" x2="58" y2="4" stroke="#fcd34d" stroke-width="2" opacity="0.8"/>
+      <rect x="42" y="0" width="11" height="8" rx="0.5" fill="#ffffff"/>
+    </g>
+
+    <!-- Right Staging Area -->
+    <g id="rightCargo" transform="translate(712, 236)">
+      <rect x="0" y="34" width="80" height="4" fill="#854d0e"/>
+      <rect x="4" y="38" width="10" height="5" fill="#713f12"/>
+      <rect x="35" y="38" width="10" height="5" fill="#713f12"/>
+      <rect x="66" y="38" width="10" height="5" fill="#713f12"/>
+      <rect x="0" y="43" width="80" height="3" fill="#854d0e"/>
+      <rect x="4" y="10" width="40" height="24" rx="1.5" fill="#3b637d" stroke="#254357" stroke-width="1"/>
+      <rect x="7" y="13" width="34" height="18" fill="#2d4f66"/>
+      <line x1="7" y1="13" x2="41" y2="31" stroke="#487491" stroke-width="1.2"/>
+      <line x1="7" y1="31" x2="41" y2="13" stroke="#487491" stroke-width="1.2"/>
+      <rect x="46" y="6" width="30" height="28" rx="1.5" fill="#d9aa74" stroke="#ad7d49" stroke-width="1"/>
+      <line x1="46" y1="18" x2="76" y2="18" stroke="#fcd34d" stroke-width="2" opacity="0.85"/>
+      <rect x="52" y="10" width="10" height="6" rx="0.5" fill="#ffffff"/>
+      <rect x="12" y="-6" width="28" height="16" rx="1.5" fill="#dfad78" stroke="#b5824e" stroke-width="1"/>
+    </g>
+
+    <!-- Electric Pallet Truck -->
+    <g id="palletTruck" transform="translate(530, 252)">
+      <circle cx="12" cy="34" r="5" fill="#1e293b"/>
+      <circle cx="12" cy="34" r="2.5" fill="#64748b"/>
+      <circle cx="68" cy="35" r="3.5" fill="#1e293b"/>
+      <circle cx="82" cy="35" r="3.5" fill="#1e293b"/>
+      <rect x="22" y="30" width="66" height="5" rx="1.5" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1"/>
+      <rect x="4" y="16" width="22" height="18" rx="3" fill="#1663c7" stroke="#0f468f" stroke-width="1"/>
+      <rect x="6" y="18" width="8" height="10" rx="1" fill="#0f2b54"/>
+      <circle cx="10" cy="23" r="1.5" fill="#38bdf8"/>
+      <path d="M12 16 L2 0 H-4" stroke="#334155" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <rect x="-7" y="-3" width="6" height="6" rx="1.5" fill="#ea580c"/>
+    </g>
+  </g>
+
+  <!-- 11. Subtle Boundary Frame -->
+  <rect width="850" height="300" fill="none" stroke="#2a1f18" stroke-width="1" opacity="0.3"/>
 </svg>`;
 
 function isEastHubContext(warehouseName = '', warehouseCode = ''): boolean {
@@ -612,7 +621,7 @@ app.innerHTML = `
     </div>
   </div>
   <div class="scrim" id="scrim"></div>
-  <aside class="drawer" id="addDrawer" aria-hidden="true"><div class="drawer-head"><div><small>Inventory</small><h2>Add new item</h2></div><button id="closeDrawer">${icon('close')}</button></div><form id="addForm"><label>Item name<input name="name" required placeholder="e.g. Cordless screwdriver"></label><label>SKU<input name="sku" required placeholder="TL-000-000"></label><div class="form-row"><label>Category<select name="categoryId" required><option value="">Loading categories…</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="0"></label></div><div class="form-row"><label>Unit cost (PHP ₱)<input name="unitCost" type="number" min="0" step=".01" value="0" placeholder="0.00" aria-label="Unit cost in Philippine pesos"></label><label>Reorder level<input name="reorderLevel" type="number" min="0" value="10"></label></div><label>Warehouse location<select name="locationId" required><option value="">Loading locations…</option></select></label><label>Description<textarea name="description" placeholder="Add item details..."></textarea></label><div class="drawer-actions"><button type="button" id="cancelDrawer">Cancel</button><button class="save" type="submit">Save item</button></div></form></aside>
+  <aside class="drawer" id="addDrawer" aria-hidden="true"><div class="drawer-head"><div><small>Quick Inventory</small><h2>Add new item</h2></div><button id="closeDrawer" type="button" aria-label="Close drawer">${icon('close')}</button></div><form id="addForm"><div class="drawer-row-grid"><label class="drawer-field-label"><span>Item name <strong class="req">*</strong></span><input name="name" required placeholder="e.g. Cordless screwdriver"></label><label class="drawer-field-label"><span>SKU <strong class="req">*</strong></span><input name="sku" required placeholder="TL-000-000" style="text-transform:uppercase"></label></div><div class="drawer-row-grid"><label class="drawer-field-label"><span>Category <strong class="req">*</strong></span><select name="categoryId" required><option value="">Loading categories…</option></select></label><label class="drawer-field-label"><span>Initial stock</span><input name="quantity" type="number" min="0" value="0"></label></div><div class="drawer-row-grid"><label class="drawer-field-label"><span>Unit cost (PHP ₱)</span><input name="unitCost" type="number" min="0" step=".01" value="0" placeholder="0.00" aria-label="Unit cost in Philippine pesos"></label><label class="drawer-field-label"><span>Reorder level</span><input name="reorderLevel" type="number" min="0" value="10"></label></div><div class="stepped-location-card drawer-location-card"><div class="drawer-card-header"><span class="drawer-card-title">📍 Location Hierarchy</span><span class="drawer-card-subtitle">Cascading assignment</span></div><div class="drawer-stepped-grid"><div class="stepped-field tier-warehouse-step"><div class="stepped-field-header"><span class="stepped-field-title">1. Facility</span><span class="tier-pill-badge tier-badge-warehouse">Facility</span></div><select name="warehouseId" id="quickAddWarehouse" required><option value="">Loading facilities…</option></select></div><div class="stepped-field tier-zone-step"><div class="stepped-field-header"><span class="stepped-field-title">2. Zone / Aisle</span><span class="tier-pill-badge tier-badge-zone">Zone</span></div><select name="sectionId" id="quickAddZone" required disabled><option value="">Select Warehouse…</option></select></div></div><div class="stepped-field tier-slot-step"><div class="stepped-field-header"><span class="stepped-field-title">3. Target Storage Location</span><span class="tier-pill-badge tier-badge-slot">Pick Point</span></div><select name="locationId" id="quickAddLocation" required disabled><option value="">Select Zone first…</option></select></div><div id="quickAddBreadcrumb" class="drawer-breadcrumb-bar"></div><div id="quickAddCapacityPill" class="drawer-capacity-pill" hidden></div></div><label class="drawer-field-label drawer-remarks-field"><span>Optional remarks / specifications <small>(handling notes, serials, storage guidelines)</small></span><textarea name="description" placeholder="Enter any item details, handling instructions, dimensions, serial numbers, or operational remarks..."></textarea></label><div class="drawer-actions"><button type="button" id="cancelDrawer">Cancel</button><button class="save" type="submit" id="quickAddSubmit">Save item</button></div></form></aside>
   <aside class="drawer location-drawer" id="locationDrawer" aria-hidden="true"><div id="locationDrawerContent"></div></aside>
   <div class="toast" id="toast"><span>✓</span><div><b>Inventory updated</b><small id="toastText">New inventory item added</small></div><button>${icon('close')}</button></div>
   <aside class="notification-panel" id="notificationPanel"><div><h3>Notifications</h3><button class="close-notifications">${icon('close')}</button></div><section></section></aside>
@@ -627,7 +636,7 @@ const toast = document.querySelector<HTMLElement>('#toast')!;
 const closePanels = () => { sidebar.classList.remove('open'); drawer.classList.remove('open'); locationDrawer.classList.remove('open'); scrim.classList.remove('show'); drawer.setAttribute('aria-hidden','true'); locationDrawer.setAttribute('aria-hidden','true'); };
 document.querySelector('#menuButton')?.addEventListener('click', () => { sidebar.classList.add('open'); scrim.classList.add('show'); });
 document.querySelector('#mobileSearchButton')?.addEventListener('click', () => { document.querySelector('.header')?.classList.toggle('search-open'); document.querySelector<HTMLInputElement>('#globalSearch')?.focus(); });
-document.querySelector('#quickAdd')?.addEventListener('click', async () => { drawer.classList.add('open'); scrim.classList.add('show'); drawer.setAttribute('aria-hidden','false');try{const [categories,locations]:any[]=await Promise.all([apiRequest('/categories'),apiRequest('/locations')]);const categorySelect=drawer.querySelector<HTMLSelectElement>('[name="categoryId"]')!;const locationSelect=drawer.querySelector<HTMLSelectElement>('[name="locationId"]')!;categorySelect.innerHTML=categories.map((entry:any)=>`<option value="${entry.id}">${entry.name}</option>`).join('');locationSelect.innerHTML=locations.filter((entry:any)=>entry.locationType!=='WAREHOUSE'&&entry.status==='ACTIVE').map((entry:any)=>`<option value="${entry.id}">${entry.name} (${entry.code}) — ${entry.currentUsage}/${entry.maximumCapacity} units</option>`).join('');}catch(error){closePanels();showError(error instanceof Error?error.message:'Form options could not be loaded.');} });
+document.querySelector('#quickAdd')?.addEventListener('click', async () => { drawer.classList.add('open'); scrim.classList.add('show'); drawer.setAttribute('aria-hidden','false');try{const [categories,locations]:any[]=await Promise.all([apiRequest('/categories'),apiRequest('/locations')]);const categorySelect=drawer.querySelector<HTMLSelectElement>('[name="categoryId"]')!;categorySelect.innerHTML=categories.map((entry:any)=>`<option value="${entry.id}">${entry.name}</option>`).join('');const hierarchy=buildLocationHierarchy(locations);setupCascadingLocationChain({hierarchy,warehouseSelect:drawer.querySelector<HTMLSelectElement>('#quickAddWarehouse')!,zoneSelect:drawer.querySelector<HTMLSelectElement>('#quickAddZone')!,locationSelect:drawer.querySelector<HTMLSelectElement>('#quickAddLocation')!,breadcrumbContainer:drawer.querySelector<HTMLElement>('#quickAddBreadcrumb'),pillContainer:drawer.querySelector<HTMLElement>('#quickAddCapacityPill'),quantityInput:drawer.querySelector<HTMLInputElement>('[name="quantity"]'),submitButton:drawer.querySelector<HTMLButtonElement>('#quickAddSubmit')});}catch(error){closePanels();showError(error instanceof Error?error.message:'Form options could not be loaded.');} });
 document.querySelector('#closeDrawer')?.addEventListener('click', closePanels);
 document.querySelector('#cancelDrawer')?.addEventListener('click', closePanels);
 scrim.addEventListener('click', closePanels);
@@ -679,9 +688,14 @@ const renderLocationDetails = (location: any) => {
   const sublocations = Array.isArray(location.sublocations) ? location.sublocations : [];
   const items = Array.isArray(location.items) ? location.items : [];
   const typeLabel = location.locationType === 'WAREHOUSE' ? 'Warehouse facility' : location.locationType === 'SECTION' ? 'Storage section' : 'Storage slot';
+  const tierBadge = location.locationType === 'WAREHOUSE' 
+    ? '<span class="tier-pill-badge tier-badge-warehouse">Facility</span>' 
+    : location.locationType === 'SECTION' 
+    ? '<span class="tier-pill-badge tier-badge-zone">Zone / Aisle</span>' 
+    : '<span class="tier-pill-badge tier-badge-slot">Pick Point</span>';
 
   document.querySelector('#locationDrawerContent')!.innerHTML = `
-    <div class="drawer-head"><div><small>${typeLabel}</small><h2>${esc(location.name)}</h2></div><button class="close-location">${icon('close')}</button></div>
+    <div class="drawer-head"><div><div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;"><small>${typeLabel}</small>${tierBadge}</div><h2>${esc(location.name)}</h2></div><button class="close-location">${icon('close')}</button></div>
     <div class="location-detail-body">
       <div class="location-code"><span>${esc(location.code)}</span><div><b>Location Code</b><small>${esc(location.parentName ?? 'Main Warehouse')} · Active</small></div></div>
       <section class="detail-capacity ${tone}" style="--util:${percent}%"><div><span>Utilization</span><strong>${percent}%</strong></div><div class="detail-progress"><i></i></div><small>${currentUsage.toLocaleString()} of ${maximumCapacity.toLocaleString()} units occupied</small></section>
@@ -1043,7 +1057,7 @@ document.addEventListener('click', e => {
 
 
 toast.querySelector('button')?.addEventListener('click', () => toast.classList.remove('show'));
-document.querySelector('#addForm')?.addEventListener('submit', async e => { e.preventDefault();const form=new FormData(e.target as HTMLFormElement);try{await apiRequest('/items',{method:'POST',body:JSON.stringify({name:form.get('name'),sku:form.get('sku'),description:form.get('description'),categoryId:Number(form.get('categoryId')),locationId:Number(form.get('locationId')),unit:'unit',unitCost:Number(form.get('unitCost')),reorderLevel:Number(form.get('reorderLevel')),initialQuantity:Number(form.get('quantity')),initialStockReason:'Initial stock entered during item creation.'})});closePanels();(e.target as HTMLFormElement).reset();window.dispatchEvent(new CustomEvent('stockhub:mutation'));document.querySelector('#toastText')!.textContent='New inventory item added';toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),3500);}catch(error){showError(error instanceof Error?error.message:'Item could not be saved.','Item could not be saved');} });
+document.querySelector('#addForm')?.addEventListener('submit', async e => { e.preventDefault();const form=new FormData(e.target as HTMLFormElement);try{await apiRequest('/items',{method:'POST',body:JSON.stringify({name:form.get('name'),sku:String(form.get('sku')||'').trim().toUpperCase(),description:form.get('description'),categoryId:Number(form.get('categoryId')),warehouseId:Number(form.get('warehouseId')),locationId:Number(form.get('locationId')),unit:'unit',unitCost:Number(form.get('unitCost')),reorderLevel:Number(form.get('reorderLevel')),initialQuantity:Number(form.get('quantity')),initialStockReason:'Initial stock entered during item creation.'})});closePanels();(e.target as HTMLFormElement).reset();window.dispatchEvent(new CustomEvent('stockhub:mutation'));document.querySelector('#toastText')!.textContent='New inventory item added';toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),3500);}catch(error){showError(error instanceof Error?error.message:'Item could not be saved.','Item could not be saved');} });
 
 const markNotificationsSeen=()=>{if(latestNotificationId>0)localStorage.setItem(notificationSeenKey,String(latestNotificationId));const badge=document.querySelector<HTMLElement>('#notificationButton span');if(badge){badge.textContent='0';badge.hidden=true;}};
 document.querySelector('#notificationButton')?.addEventListener('click',()=>{const panel=document.querySelector('#notificationPanel');const opening=!panel?.classList.contains('show');panel?.classList.toggle('show');if(opening)markNotificationsSeen();});
@@ -1117,7 +1131,20 @@ document.querySelector<HTMLButtonElement>('#globalLogout')!.addEventListener('cl
   }
 });
 
-async function initializeAuthenticatedUi():Promise<void>{const session:any=await apiRequest('/auth/me');currentUserRole=session.user.role;notificationSeenKey=`stockhub.notifications.seenId.${String(session.user.email).toLowerCase()}`;const admin=currentUserRole==='ADMIN';document.querySelector<HTMLButtonElement>('#quickAdd')!.hidden=!admin;const profile=document.querySelector<HTMLElement>('.profile')!;profile.querySelector('b')!.textContent=session.user.name;profile.querySelector('small')!.textContent=session.user.email;profile.querySelector('.avatar')!.textContent=session.user.name.split(/\s+/).map((part:string)=>part[0]).join('').slice(0,2).toUpperCase();await loadLiveDashboard();startLiveUpdates();}
+async function initializeAuthenticatedUi():Promise<void>{
+  const session:any=await apiRequest('/auth/me');
+  currentUserRole=session.user.role;
+  notificationSeenKey=`stockhub.notifications.seenId.${String(session.user.email).toLowerCase()}`;
+  const admin=currentUserRole==='ADMIN';
+  document.querySelector<HTMLButtonElement>('#quickAdd')!.hidden=!admin;
+  const profile=document.querySelector<HTMLElement>('.profile')!;
+  profile.querySelector('b')!.textContent=session.user.name;
+  profile.querySelector('small')!.textContent=session.user.email;
+  profile.querySelector('.avatar')!.textContent=session.user.name.split(/\s+/).map((part:string)=>part[0]).join('').slice(0,2).toUpperCase();
+  profile.onclick=()=>document.querySelector<HTMLElement>('.nav-item[data-label="Settings"]')?.click();
+  await loadLiveDashboard();
+  startLiveUpdates();
+}
 void ensureSession().then(authenticated=>{
   if(authenticated){void initializeAuthenticatedUi();}
   else showLogin(()=>{void initializeAuthenticatedUi();});
